@@ -1,0 +1,8 @@
+# Kubernetes Namespace for StockMate AI
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stockmate-ai
+  labels:
+    name: stockmate-ai
+    app: stockmate
