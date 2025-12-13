@@ -20,11 +20,23 @@ def fetch_single_ticker(ticker: str, period="5y", interval="1d") -> pd.DataFrame
     )
 
     if df.empty:
-        raise ValueError(f"No data found for {ticker}")
+        raise ValueError(f"No data returned for {ticker}")
 
+    # -------------------------------
+    # FIX MULTIINDEX COLUMN PROBLEM
+    # -------------------------------
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0].lower() for col in df.columns]
+    else:
+        df.columns = [str(col).lower() for col in df.columns]
+
+    df.rename(columns={"Date": "date"}, inplace=True)
+
+    # add date column
     df = df.reset_index()
+
+    # add ticker symbol
     df["symbol"] = ticker
-    df.rename(columns=str.lower, inplace=True)  # Date->date, Open->open
 
     return df
 
@@ -41,7 +53,7 @@ def fetch_universe(tickers: list[str]):
             df = fetch_single_ticker(t)
             save_ticker(df, t)
         except Exception as e:
-            print(f"Failed for {t}: {e}")
+            print(f"[ERROR] {t}: {e}")
 
 
 if __name__ == "__main__":

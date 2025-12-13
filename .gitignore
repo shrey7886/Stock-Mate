@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+ml_service/sentiment/sentiment_model.py
+ml_service/sentiment/news_scraper.py
+ml_service/sentiment/update_sentiment.py
+ml_service/sentiment/reddit_scraper.py
+
