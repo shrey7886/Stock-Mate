@@ -1,0 +1,29 @@
+# Core (required to run sample sentiment script)
+pandas>=1.3
+numpy>=1.21
+pyarrow>=6.0.0           # for read_parquet / to_parquet
+pandas-ta>=0.3.14b0      # technical indicators (imported as pandas_ta)
+scikit-learn>=1.0        # for scalers/label encoding used in ml_service
+
+# Optional (APIs & env)
+requests>=2.28
+python-dotenv>=1.0
+tweepy>=4.0
+
+# NLP / Hugging Face (optional — for FinBERT)
+transformers>=4.30
+huggingface-hub>=0.14
+
+# Pushshift Reddit Pipeline
+zstandard>=0.21.0  # For streaming .zst decompression
+
+# Deep learning backend (PyTorch) - OPTIONAL / platform-specific
+# PyTorch wheels are platform/CUDA-specific. Do NOT uncomment blindly.
+# For CPU-only installation (recommended if you don't have GPU):
+# pip install --index-url https://download.pytorch.org/whl/cpu torch
+# If you want to reference here, leave commented and install separately:
+# torch>=1.13
+
+# Notes:
+# - If you won't use real APIs / FinBERT, you can remove `requests`, `tweepy`, `transformers`, and `torch`.
+# - The sample-data script only requires: pandas, numpy (and uses pyarrow if you read/write parquet).
