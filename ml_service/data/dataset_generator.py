@@ -7,9 +7,10 @@ from ml_service.data.feature_functions import (
     add_price_features,
     add_technical_indicators,
     add_volatility_features,
-    add_sentiment_placeholders,
+    add_sentiment_features,
     add_calendar_features,
-    add_targets
+    add_targets,
+    ensure_timestamp_and_date,
 )
 
 RAW_DIR = Path("data/raw")
@@ -30,16 +31,13 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         col_str = str(col)
 
-        # Case 1: Stringified tuple → "('close', 'aapl')"
+        # Case: stringified tuple -> "('close', 'aapl')"
         if col_str.startswith("(") and "," in col_str:
-            # Extract first element
-            cleaned = col_str.split(",")[0]          # "('close'"
-            cleaned = cleaned.replace("('", "")      # "close"
-            cleaned = cleaned.replace("'", "")       # remove quotes
+            cleaned = col_str.split(",")[0]
+            cleaned = cleaned.replace("('", "").replace("'", "")
             new_cols.append(cleaned.lower())
             continue
 
-        # Case 2: Normal string column
         new_cols.append(col_str.lower())
 
     df.columns = new_cols
@@ -55,9 +53,36 @@ def ensure_close_column(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         if "adj close" in df.columns:
             df["close"] = df["adj close"]
         else:
-            raise KeyError(
-                f"'close' column missing for {ticker}. Columns: {df.columns}"
-            )
+            raise KeyError(f"'close' column missing for {ticker}. Columns: {list(df.columns)}")
+
+    return df
+
+
+def normalize_timestamp_and_symbol(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """
+    Ensure `timestamp` (datetime) and `symbol` columns exist.
+    """
+
+    df = df.copy()
+
+    # If 'timestamp' is missing but 'date' present, convert it.
+    if "timestamp" not in df.columns:
+        if "date" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["date"])
+        else:
+            # If index is datetime-like, use it
+            if pd.api.types.is_datetime64_any_dtype(df.index):
+                df = df.reset_index().rename(columns={"index": "timestamp"})
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+            else:
+                # fallback: create synthetic increasing timestamp (daily)
+                df["timestamp"] = pd.to_datetime(pd.Series(pd.date_range("2000-01-01", periods=len(df), freq="D")))
+    else:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+
+    # Ensure 'symbol' column exists
+    if "symbol" not in df.columns:
+        df["symbol"] = ticker
 
     return df
 
@@ -74,19 +99,24 @@ def generate_tft_dataset_for_ticker(ticker: str) -> pd.DataFrame:
     df = clean_columns(df)
     df = ensure_close_column(df, ticker)
 
+    # -------------- NORMALIZE TIMESTAMP & SYMBOL --------------
+    df = normalize_timestamp_and_symbol(df, ticker)
+
     # -------------- ADD TIME INDEX --------------
-    df["time_idx"] = range(len(df))
+    df = ensure_timestamp_and_date(df)
+    df["time_idx"] = df.groupby("symbol").cumcount()
 
     # -------------- APPLY FEATURE ENGINEERING --------------
     df = add_price_features(df)
     df = add_technical_indicators(df)
     df = add_volatility_features(df)
-    df = add_sentiment_placeholders(df)
+    # Merge sentiment (will use files in data/sentiment if present; else zeros)
+    df = add_sentiment_features(df, ticker)
     df = add_calendar_features(df)
     df = add_targets(df)
 
     # -------------- CLEAN & SAVE --------------
-    df = df.dropna().reset_index(drop=True)
+    df = df.dropna(subset=["close"]).reset_index(drop=True)
 
     out_path = PROCESSED_DIR / f"{ticker}_tft.parquet"
     df.to_parquet(out_path, index=False)

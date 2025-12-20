@@ -1,0 +1,12 @@
+{
+  "INFY": ["infosys", "infosys ltd", "infosys limited"],
+  "TCS": ["tcs", "tata consultancy services", "tata consulting"],
+  "RELIANCE": ["reliance", "reliance industries", "ril"],
+  "AAPL": ["apple", "apple inc", "apple computer"],
+  "MSFT": ["microsoft", "msft"],
+  "GOOGL": ["google", "alphabet", "goog"],
+  "AMZN": ["amazon", "amazon.com"],
+  "TSLA": ["tesla", "tesla motors"],
+  "NVDA": ["nvidia", "nvidia corp"]
+}
+
