@@ -1,0 +1,101 @@
+import pandas as pd
+from pathlib import Path
+
+# -----------------------------
+# Paths
+# -----------------------------
+SENTIMENT_DIR = Path("data/sentiment")
+PROCESSED_DIR = Path("data/processed")
+
+
+# -----------------------------
+# NEWS SENTIMENT PROCESSING
+# -----------------------------
+def load_daily_news_sentiment(ticker: str) -> pd.Series:
+    """
+    Returns a Series indexed by date with daily average news sentiment.
+    """
+    path = SENTIMENT_DIR / f"{ticker}_news_sentiment.csv"
+    df = pd.read_csv(path)
+
+    # Parse timestamp → date
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+
+    # Daily average composite score
+    daily_news = (
+        df.groupby("date")["composite_score"]
+        .mean()
+    )
+
+    return daily_news
+
+
+# -----------------------------
+# SOCIAL SENTIMENT PROCESSING
+# -----------------------------
+def load_daily_social_sentiment(ticker: str) -> pd.Series:
+    """
+    Returns a Series indexed by date with engagement-weighted social sentiment.
+    """
+    path = SENTIMENT_DIR / f"{ticker}_social_sentiment.csv"
+    df = pd.read_csv(path)
+
+    # Parse timestamp → date
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+
+    # Avoid division by zero
+    df["engagement"] = df["engagement"].replace(0, 1)
+
+    # Engagement-weighted sentiment
+    df["weighted_sentiment"] = df["composite_score"] * df["engagement"]
+
+    daily_social = (
+        df.groupby("date")
+        .apply(lambda x: x["weighted_sentiment"].sum() / x["engagement"].sum())
+    )
+
+    return daily_social
+
+
+# -----------------------------
+# MERGE INTO PARQUET
+# -----------------------------
+def merge_sentiment_into_parquet(ticker: str):
+    print(f"\n=== Merging sentiment for {ticker} ===")
+
+    parquet_path = PROCESSED_DIR / f"{ticker}_tft.parquet"
+    df = pd.read_parquet(parquet_path)
+
+    # Ensure date column is date type
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+
+    # Load sentiment
+    news_sent = load_daily_news_sentiment(ticker)
+    social_sent = load_daily_social_sentiment(ticker)
+
+    # Map into dataframe
+    df["sentiment_news_composite"] = df["date"].map(news_sent).fillna(0.0)
+    df["sentiment_social_score"] = df["date"].map(social_sent).fillna(0.0)
+
+    # Save updated parquet
+    df.to_parquet(parquet_path, index=False)
+
+    print(
+        f"[DONE] {ticker} | "
+        f"News days: {len(news_sent)} | "
+        f"Social days: {len(social_sent)}"
+    )
+
+
+# -----------------------------
+# RUN FOR ALL TICKERS
+# -----------------------------
+def merge_all():
+    tickers = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
+
+    for ticker in tickers:
+        merge_sentiment_into_parquet(ticker)
+
+
+if __name__ == "__main__":
+    merge_all()
