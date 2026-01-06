@@ -1,101 +1,147 @@
 import pandas as pd
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from pathlib import Path
+from datetime import datetime
+import numpy as np
 
-# -----------------------------
-# Paths
-# -----------------------------
+# =====================================================
+# CONFIG
+# =====================================================
 SENTIMENT_DIR = Path("data/sentiment")
 PROCESSED_DIR = Path("data/processed")
 
+TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
 
-# -----------------------------
+MODEL_NAME = "ProsusAI/finbert"
+DEVICE = torch.device("cpu")
+
+# Prevent CPU overload on Windows
+torch.set_num_threads(1)
+
+# =====================================================
+# LOAD FINBERT
+# =====================================================
+print("[INFO] Loading FinBERT model...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+model.to(DEVICE)
+model.eval()
+print("[INFO] FinBERT loaded successfully.")
+
+# FinBERT label order: [negative, neutral, positive]
+NEG_IDX = 0
+POS_IDX = 2
+
+
+# =====================================================
+# BATCH SENTIMENT SCORING
+# =====================================================
+def finbert_batch_score(texts, batch_size=8):
+    """
+    texts: list[str]
+    returns: list[composite_scores]
+    composite = positive - negative
+    """
+    scores = []
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+
+        inputs = tokenizer(
+            batch,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=256,   # SAFE LIMIT
+        ).to(DEVICE)
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        probs = torch.softmax(outputs.logits, dim=1)
+
+        composite = probs[:, POS_IDX] - probs[:, NEG_IDX]
+        scores.extend(composite.cpu().numpy().tolist())
+
+    return scores
+
+
+# =====================================================
 # NEWS SENTIMENT PROCESSING
-# -----------------------------
-def load_daily_news_sentiment(ticker: str) -> pd.Series:
-    """
-    Returns a Series indexed by date with daily average news sentiment.
-    """
+# =====================================================
+def process_news_sentiment(ticker):
     path = SENTIMENT_DIR / f"{ticker}_news_sentiment.csv"
     df = pd.read_csv(path)
 
-    # Parse timestamp → date
     df["date"] = pd.to_datetime(df["timestamp"]).dt.date
-
-    # Daily average composite score
-    daily_news = (
-        df.groupby("date")["composite_score"]
-        .mean()
+    df["text"] = (
+        df["title"].fillna("").astype(str)
+        + ". "
+        + df["description"].fillna("").astype(str)
     )
 
+    texts = df["text"].tolist()
+    df["composite"] = finbert_batch_score(texts)
+
+    daily_news = df.groupby("date")["composite"].mean()
     return daily_news
 
 
-# -----------------------------
+# =====================================================
 # SOCIAL SENTIMENT PROCESSING
-# -----------------------------
-def load_daily_social_sentiment(ticker: str) -> pd.Series:
-    """
-    Returns a Series indexed by date with engagement-weighted social sentiment.
-    """
+# =====================================================
+def process_social_sentiment(ticker):
     path = SENTIMENT_DIR / f"{ticker}_social_sentiment.csv"
     df = pd.read_csv(path)
 
-    # Parse timestamp → date
     df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+    df["engagement"] = df["engagement"].fillna(1).replace(0, 1)
 
-    # Avoid division by zero
-    df["engagement"] = df["engagement"].replace(0, 1)
+    texts = df["text"].fillna("").astype(str).tolist()
+    df["composite"] = finbert_batch_score(texts)
 
-    # Engagement-weighted sentiment
-    df["weighted_sentiment"] = df["composite_score"] * df["engagement"]
+    df["weighted"] = df["composite"] * df["engagement"]
 
     daily_social = (
         df.groupby("date")
-        .apply(lambda x: x["weighted_sentiment"].sum() / x["engagement"].sum())
+        .apply(lambda x: x["weighted"].sum() / x["engagement"].sum())
     )
 
     return daily_social
 
 
-# -----------------------------
+# =====================================================
 # MERGE INTO PARQUET
-# -----------------------------
-def merge_sentiment_into_parquet(ticker: str):
-    print(f"\n=== Merging sentiment for {ticker} ===")
+# =====================================================
+def merge_into_parquet(ticker):
+    print(f"\n=== Processing {ticker} ===")
 
     parquet_path = PROCESSED_DIR / f"{ticker}_tft.parquet"
     df = pd.read_parquet(parquet_path)
 
-    # Ensure date column is date type
     df["date"] = pd.to_datetime(df["date"]).dt.date
 
-    # Load sentiment
-    news_sent = load_daily_news_sentiment(ticker)
-    social_sent = load_daily_social_sentiment(ticker)
+    news_daily = process_news_sentiment(ticker)
+    social_daily = process_social_sentiment(ticker)
 
-    # Map into dataframe
-    df["sentiment_news_composite"] = df["date"].map(news_sent).fillna(0.0)
-    df["sentiment_social_score"] = df["date"].map(social_sent).fillna(0.0)
+    df["sentiment_news_composite"] = df["date"].map(news_daily).fillna(0.0)
+    df["sentiment_social_score"] = df["date"].map(social_daily).fillna(0.0)
 
-    # Save updated parquet
     df.to_parquet(parquet_path, index=False)
 
     print(
         f"[DONE] {ticker} | "
-        f"News days: {len(news_sent)} | "
-        f"Social days: {len(social_sent)}"
+        f"News days: {len(news_daily)} | "
+        f"Social days: {len(social_daily)}"
     )
 
 
-# -----------------------------
-# RUN FOR ALL TICKERS
-# -----------------------------
-def merge_all():
-    tickers = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
-
-    for ticker in tickers:
-        merge_sentiment_into_parquet(ticker)
-
-
+# =====================================================
+# MAIN
+# =====================================================
 if __name__ == "__main__":
-    merge_all()
+    for ticker in TICKERS:
+        merge_into_parquet(ticker)
+
+    print("\n[SUCCESS] Sentiment computation & merge complete.")
