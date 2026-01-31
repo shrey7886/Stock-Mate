@@ -1,0 +1,55 @@
+from pathlib import Path
+import pandas as pd
+
+PROCESSED_DIR = Path("data/processed")
+
+SENTIMENT_COLS = [
+    "sentiment_news_composite",
+    "sentiment_social_score",
+]
+
+
+def shift_sentiment(df: pd.DataFrame) -> pd.DataFrame:
+    # Ensure correct ordering
+    df = df.sort_values(["symbol", "time_idx"]).reset_index(drop=True)
+
+    # Shift sentiment per symbol
+    for col in SENTIMENT_COLS:
+        if col in df.columns:
+            df[col] = df.groupby("symbol")[col].shift(1)
+
+    # Drop rows with NaNs introduced by shifting
+    df = df.dropna().reset_index(drop=True)
+    return df
+
+
+def process_parquet_file(path: Path):
+    df = pd.read_parquet(path)
+
+    # Safety check
+    missing = [c for c in SENTIMENT_COLS if c not in df.columns]
+    if missing:
+        print(f"[SKIP] {path.name} missing columns: {missing}")
+        return
+
+    df_shifted = shift_sentiment(df)
+
+    # Overwrite safely (intentional)
+    df_shifted.to_parquet(path, index=False)
+    print(f"[OK] Shifted sentiment → {path.name}")
+
+
+def main():
+    parquet_files = list(PROCESSED_DIR.glob("*.parquet"))
+
+    if not parquet_files:
+        raise RuntimeError("No parquet files found in data/processed")
+
+    for pq in parquet_files:
+        process_parquet_file(pq)
+
+    print("\n✅ Sentiment shifted by 1 day in ALL processed parquet files")
+
+
+if __name__ == "__main__":
+    main()

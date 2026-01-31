@@ -1,0 +1,190 @@
+import numpy as np
+import pandas as pd
+import torch
+
+from pathlib import Path
+from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting.data.encoders import GroupNormalizer, MultiNormalizer
+
+# =====================================================
+# CONFIG
+# =====================================================
+DATA_PATH = Path("data/processed/tft_full_universe.parquet")
+MODEL_PATH = Path("models/tft/tft_leakage_safe.ckpt")
+
+MAX_ENCODER_LENGTH = 60
+MAX_PREDICTION_LENGTH = 7
+BATCH_SIZE = 64
+
+TARGETS = [
+    "target_future_1",
+    "target_future_2",
+    "target_future_3",
+    "target_future_4",
+    "target_future_5",
+    "target_future_6",
+    "target_future_7",
+]
+
+# =====================================================
+# PYTORCH 2.6 SAFE LOAD
+# =====================================================
+torch.serialization.add_safe_globals([
+    GroupNormalizer,
+    MultiNormalizer,
+])
+
+# =====================================================
+# LOAD DATA
+# =====================================================
+df = pd.read_parquet(DATA_PATH)
+df["date"] = pd.to_datetime(df["date"])
+df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
+
+symbols = df["symbol"].unique()
+print("Symbols:", symbols)
+
+# =====================================================
+# LOAD MODEL
+# =====================================================
+model = TemporalFusionTransformer.load_from_checkpoint(
+    MODEL_PATH,
+    weights_only=False,
+)
+model.eval()
+
+# =====================================================
+# METRIC HELPERS
+# =====================================================
+def directional_accuracy(true_dir, pred_dir):
+    return np.mean(true_dir == pred_dir) * 100
+
+
+# =====================================================
+# BASELINE COMPARISON
+# =====================================================
+tft_scores = []
+random_scores = []
+always_up_scores = []
+
+for symbol in symbols:
+    sdf = df[df["symbol"] == symbol].copy()
+
+    # -----------------------------
+    # Build TimeSeriesDataSet
+    # -----------------------------
+    dataset = TimeSeriesDataSet(
+        sdf,
+        time_idx="time_idx",
+        target=TARGETS,
+        group_ids=["symbol"],
+        max_encoder_length=MAX_ENCODER_LENGTH,
+        max_prediction_length=MAX_PREDICTION_LENGTH,
+
+        static_categoricals=["symbol"],
+
+        # ✅ calendar features as REALS
+        time_varying_known_categoricals=[],
+        time_varying_known_reals=[
+            "day_of_week",
+            "week_of_year",
+            "month",
+            "is_month_start",
+            "is_month_end",
+        ],
+
+        time_varying_unknown_reals=[
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "returns_pct",
+            "log_returns",
+            "high_low_spread",
+            "open_close_spread",
+            "rolling_mean_7",
+            "rolling_std_7",
+            "rolling_std_30",
+            "EMA_20",
+            "EMA_50",
+            "SMA_20",
+            "RSI_14",
+            "MACD",
+            "MACD_signal",
+            "MACD_hist",
+            "ATR_14",
+            "true_range",
+            "bollinger_bandwidth",
+            "volatility_20d",
+            "volatility_60d",
+            "sentiment_news_composite",
+            "sentiment_social_score",
+        ],
+
+        target_normalizer=MultiNormalizer(
+            [GroupNormalizer(groups=["symbol"]) for _ in range(7)]
+        ),
+
+        allow_missing_timesteps=False,
+    )
+
+    loader = dataset.to_dataloader(
+        train=False,
+        batch_size=BATCH_SIZE,
+        num_workers=0,
+    )
+
+    # -----------------------------
+    # TFT ROLLING PREDICTIONS
+    # -----------------------------
+    y_hat, x = model.predict(
+        loader,
+        mode="prediction",
+        return_x=True,
+    )
+
+    # Horizon t+1
+    y_pred = y_hat[:, 0].detach().cpu().numpy()
+    y_true = x["decoder_target"][:, 0].detach().cpu().numpy()
+
+    # Last known close (encoder last step)
+    last_close = x["encoder_cont"][:, -1, 0].detach().cpu().numpy()
+
+    # Directions
+    tft_dir = np.sign(y_pred - last_close)
+    true_dir = np.sign(y_true - last_close)
+
+    # -----------------------------
+    # BASELINES
+    # -----------------------------
+    random_dir = np.random.choice([-1, 1], size=len(true_dir))
+    always_up_dir = np.ones(len(true_dir))
+
+    # -----------------------------
+    # METRICS
+    # -----------------------------
+    tft_da = directional_accuracy(true_dir, tft_dir)
+    rand_da = directional_accuracy(true_dir, random_dir)
+    up_da = directional_accuracy(true_dir, always_up_dir)
+
+    tft_scores.append(tft_da)
+    random_scores.append(rand_da)
+    always_up_scores.append(up_da)
+
+    print(
+        f"{symbol} | "
+        f"TFT={tft_da:.2f}% | "
+        f"Random={rand_da:.2f}% | "
+        f"AlwaysUp={up_da:.2f}%"
+    )
+
+# =====================================================
+# FINAL SUMMARY
+# =====================================================
+print("\n📊 FINAL BASELINE COMPARISON")
+print(f"TFT Avg        : {np.mean(tft_scores):.2f}%")
+print(f"Random Avg     : {np.mean(random_scores):.2f}%")
+print(f"AlwaysUp Avg   : {np.mean(always_up_scores):.2f}%")
+print(f"Lift vs Random : {np.mean(tft_scores) - np.mean(random_scores):.2f}%")
+print(f"Lift vs Always : {np.mean(tft_scores) - np.mean(always_up_scores):.2f}%")

@@ -1,0 +1,96 @@
+import numpy as np
+import pandas as pd
+
+from pytorch_forecasting import TemporalFusionTransformer
+from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
+from torch.serialization import safe_globals
+
+
+MODEL_PATH = "models/tft/tft_no_sentiment.ckpt"
+DATA_PATH = "data/processed/tft_full_universe.parquet"
+
+TARGET_COLS = [f"target_future_{i}" for i in range(1, 8)]
+
+
+# ===============================
+# LOAD DATA
+# ===============================
+df = pd.read_parquet(DATA_PATH)
+df["date"] = pd.to_datetime(df["date"])
+
+test_df = df[df.date >= "2024-01-01"].copy()
+symbols = test_df["symbol"].unique()
+
+print(f"Test rows: {len(test_df)}")
+print(f"Symbols: {symbols}")
+
+
+# ===============================
+# LOAD MODEL
+# ===============================
+with safe_globals([MultiNormalizer, GroupNormalizer]):
+    model = TemporalFusionTransformer.load_from_checkpoint(
+        MODEL_PATH,
+        map_location="cpu",
+        weights_only=False,
+    )
+
+model.eval()
+print("✔ Model loaded successfully")
+
+
+# ===============================
+# BUILD TEST DATASET FROM MODEL
+# ===============================
+test_ds = model.dataset.from_dataframe(
+    test_df,
+    predict=True,
+    stop_randomization=True,
+)
+
+# Get predictions (shape: [N, 7])
+preds = model.predict(test_ds).cpu().numpy()
+
+# Align ground truth
+y_true = test_df[TARGET_COLS].values
+closes = test_df["close"].values
+symbols_arr = test_df["symbol"].values
+
+
+# ===============================
+# PER-SYMBOL METRICS
+# ===============================
+mae_list, rmse_list, dir_acc_list = [], [], []
+
+for symbol in symbols:
+    idx = symbols_arr == symbol
+
+    if idx.sum() < 20:
+        continue
+
+    p = preds[idx]
+    y = y_true[idx]
+    c = closes[idx]
+
+    mae = np.mean(np.abs(p - y))
+    rmse = np.sqrt(np.mean((p - y) ** 2))
+
+    # Directional accuracy for t+1
+    dir_acc = np.mean(
+        np.sign(p[:, 0] - c) == np.sign(y[:, 0] - c)
+    )
+
+    print(f"{symbol} | MAE={mae:.4f} RMSE={rmse:.4f} DIR_ACC={dir_acc:.2%}")
+
+    mae_list.append(mae)
+    rmse_list.append(rmse)
+    dir_acc_list.append(dir_acc)
+
+
+# ===============================
+# FINAL AGGREGATE METRICS
+# ===============================
+print("\n📊 FINAL AGGREGATED RESULTS")
+print(f"MAE  : {np.mean(mae_list):.4f}")
+print(f"RMSE : {np.mean(rmse_list):.4f}")
+print(f"Directional Accuracy (t+1): {np.mean(dir_acc_list):.2%}")
