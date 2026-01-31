@@ -1,0 +1,73 @@
+from pathlib import Path
+import pandas as pd
+
+# ----------------------------
+# CONFIG
+# ----------------------------
+
+PROCESSED_DIR = Path("data/processed")
+OUTPUT_PATH = PROCESSED_DIR / "tft_full_universe.parquet"
+
+# ----------------------------
+# LOAD ALL *_tft.parquet FILES
+# ----------------------------
+
+dfs = []
+
+for file in PROCESSED_DIR.glob("*_tft.parquet"):
+    if file.name == "tft_full_universe.parquet":
+        continue
+
+    print(f"Loading {file.name}")
+    df = pd.read_parquet(file)
+
+    # Safety: ensure date is datetime
+    df["date"] = pd.to_datetime(df["date"])
+
+    dfs.append(df)
+
+if not dfs:
+    raise RuntimeError("❌ No per-stock TFT parquet files found")
+
+# ----------------------------
+# CONCATENATE
+# ----------------------------
+
+full_df = pd.concat(dfs, ignore_index=True)
+
+# ----------------------------
+# SORT + CLEAN
+# ----------------------------
+
+full_df = (
+    full_df
+    .sort_values(["symbol", "date"])
+    .reset_index(drop=True)
+)
+
+# ----------------------------
+# SANITY CHECKS
+# ----------------------------
+
+required_cols = [
+    "sentiment_news_composite",
+    "sentiment_social_score"
+]
+
+for col in required_cols:
+    if col not in full_df.columns:
+        raise ValueError(f"❌ Missing column: {col}")
+
+if full_df[required_cols].isna().any().any():
+    print("⚠️ Warning: NaNs detected in sentiment columns")
+
+# ----------------------------
+# SAVE
+# ----------------------------
+
+full_df.to_parquet(OUTPUT_PATH, index=False)
+
+print(f"\n✅ Rebuilt full universe dataset:")
+print(f"➡ {OUTPUT_PATH}")
+print(f"➡ Rows: {len(full_df)}")
+print(f"➡ Symbols: {full_df.symbol.nunique()}")

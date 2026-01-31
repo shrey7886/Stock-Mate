@@ -148,5 +148,18 @@ def build_universe_dataset(tickers: list[str]) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
+    TICKERS = [
+        # Tech (9)
+        "AAPL", "MSFT", "NVDA", "AMD", "META", "GOOGL", "ORCL", "CRM", "INTC",
+        # Financials (7)
+        "JPM", "BAC", "GS", "MS", "WFC", "C", "AXP",
+        # Energy (5)
+        "XOM", "CVX", "BP", "SLB", "COP",
+        # Consumer (6)
+        "PG", "KO", "PEP", "WMT", "COST", "MCD",
+        # Healthcare (5)
+        "JNJ", "PFE", "MRK", "ABBV", "UNH",
+        # Industrials (5)
+        "CAT", "DE", "GE", "HON", "MMM"
+    ]
     build_universe_dataset(TICKERS)

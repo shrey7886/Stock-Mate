@@ -6,6 +6,7 @@ Cleans Reddit posts/comments while preserving financial terminology.
 import re
 from typing import Optional
 import logging
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 

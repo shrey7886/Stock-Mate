@@ -1,0 +1,12 @@
+import pandas as pd
+
+df = pd.read_parquet("data/processed/tft_full_universe.parquet")
+
+# Pick ONE symbol to inspect clearly
+aapl = df[df["symbol"] == "AAPL"].sort_values("date")
+
+print(
+    aapl[["date", "sentiment_news_composite"]]
+    .head(10)
+)
+
