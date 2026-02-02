@@ -1,0 +1,22 @@
+"""
+sentiment_requirements.txt
+Install sentiment pipeline dependencies with:
+  pip install -r sentiment_requirements.txt
+"""
+
+# Core data processing
+pandas>=1.3.0
+numpy>=1.21.0
+
+# API requests
+requests>=2.27.0
+
+# Deep Learning (FinBERT Sentiment Analysis)
+torch>=1.10.0
+transformers>=4.15.0
+
+# Scheduling (optional, for auto-updates)
+schedule>=1.1.0
+
+# Additional utilities
+python-dateutil>=2.8.0

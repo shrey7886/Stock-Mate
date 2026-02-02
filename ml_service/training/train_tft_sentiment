@@ -19,7 +19,7 @@ from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 # ============================================================
 # CONFIG
 # ============================================================
-USE_SENTIMENT = False          # 🔁 TOGGLE THIS
+USE_SENTIMENT = True           # TOGGLE THIS: True = with sentiment, False = without
 SEED = 42
 
 DATA_PATH = Path("data/processed/tft_full_universe.parquet")
@@ -69,8 +69,9 @@ NUMERIC_COLS = [
     "ATR_14", "true_range",
     "bollinger_bandwidth",
     "volatility_20d", "volatility_60d",
-    "sentiment_news_composite",
-    "sentiment_social_score",
+    "na_sentiment_score_mean_lag1",
+    "na_positive_score_mean_lag1",
+    "na_negative_score_mean_lag1",
 ]
 
 # Replace inf → NaN
@@ -106,7 +107,7 @@ before = len(df)
 df = df.dropna(subset=TARGET_COLS).reset_index(drop=True)
 after = len(df)
 
-print(f"✔ Dropped {before - after} rows without full future horizon")
+print(f"[OK] Dropped {before - after} rows without full future horizon")
 
 
 
@@ -120,7 +121,7 @@ test_df  = df[df.date >= VAL_END_DATE]
 assert train_df.date.max() < val_df.date.min()
 assert val_df.date.max() < test_df.date.min()
 
-print("✔ Time-based split verified")
+print("[OK] Time-based split verified")
 print(f"Train rows: {len(train_df)}")
 print(f"Val rows  : {len(val_df)}")
 print(f"Test rows : {len(test_df)}")
@@ -259,7 +260,7 @@ trainer.fit(
     val_dataloaders=val_loader,
 )
 
-print("\n✅ TFT training completed (leakage-safe)")
+print("\n[SUCCESS] TFT training completed (leakage-safe)")
 
 
 # ============================================================
@@ -269,4 +270,4 @@ suffix = "with_sentiment" if USE_SENTIMENT else "no_sentiment"
 checkpoint_path = MODEL_DIR / f"tft_{suffix}.ckpt"
 
 trainer.save_checkpoint(checkpoint_path)
-print(f"✔ Model saved to {checkpoint_path}")
+print(f"[OK] Model saved to {checkpoint_path}")
