@@ -6,7 +6,7 @@ from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 from torch.serialization import safe_globals
 
 
-MODEL_PATH = "models/tft/tft_no_sentiment.ckpt"
+MODEL_PATH = "models/tft/tft_leakage_safe_no_sentiment.ckpt"
 DATA_PATH = "data/processed/tft_full_universe.parquet"
 
 TARGET_COLS = [f"target_future_{i}" for i in range(1, 8)]
@@ -45,6 +45,7 @@ print("✔ Model loaded successfully")
 mae_list = []
 rmse_list = []
 dir_acc_list = []
+symbol_list = []
 
 
 # ===============================
@@ -73,22 +74,36 @@ for symbol in symbols:
     mae = np.mean(np.abs(preds - y_true))
     rmse = np.sqrt(np.mean((preds - y_true) ** 2))
 
+    # Directional accuracy: does predicted return sign match actual return sign?
     dir_acc = np.mean(
-        np.sign(preds[:, 0] - df_sym["close"].values[:min_len])
-        == np.sign(y_true[:, 0] - df_sym["close"].values[:min_len])
+        np.sign(preds[:, 0]) == np.sign(y_true[:, 0])
     )
-
-    print(f"{symbol} | MAE={mae:.4f} RMSE={rmse:.4f} DIR_ACC={dir_acc:.2%}")
 
     mae_list.append(mae)
     rmse_list.append(rmse)
     dir_acc_list.append(dir_acc)
+    symbol_list.append(symbol)
 
 
 # ===============================
-# FINAL AGGREGATE METRICS
+# DISPLAY RESULTS IN TABLE FORMAT
 # ===============================
-print("\n📊 FINAL AGGREGATED RESULTS")
-print(f"MAE  : {np.mean(mae_list):.4f}")
-print(f"RMSE : {np.mean(rmse_list):.4f}")
-print(f"Directional Accuracy (t+1): {np.mean(dir_acc_list):.2%}")
+results_df = pd.DataFrame({
+    'Stock': symbol_list,
+    'MAE': mae_list,
+    'RMSE': rmse_list,
+    'DIR_ACC': [f"{x:.1%}" for x in dir_acc_list]
+})
+
+print("\n" + "="*60)
+print("EVALUATION RESULTS - ALL STOCKS")
+print("="*60)
+print(results_df.to_string(index=False))
+
+print("\n" + "="*60)
+print("FINAL AGGREGATED RESULTS")
+print("="*60)
+print(f"{'MAE':20s}: {np.mean(mae_list):.6f} ± {np.std(mae_list):.6f}")
+print(f"{'RMSE':20s}: {np.mean(rmse_list):.6f} ± {np.std(rmse_list):.6f}")
+print(f"{'DIR_ACC':20s}: {np.mean(dir_acc_list):.1%} ± {np.std(dir_acc_list):.1%}")
+print("="*60)
