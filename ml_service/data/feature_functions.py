@@ -279,5 +279,7 @@ def add_targets(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
     if "close" not in df.columns:
         raise KeyError("'close' column required to create targets.")
     for i in range(1, horizon + 1):
-        df[f"target_future_{i}"] = df["close"].shift(-i)
+        future_price = df["close"].shift(-i)
+        # Log returns: ln(future_price / current_price)
+        df[f"target_future_{i}"] = np.log(future_price / df["close"])
     return df

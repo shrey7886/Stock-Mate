@@ -116,7 +116,7 @@ def generate_tft_dataset_for_ticker(ticker: str) -> pd.DataFrame:
     df = add_targets(df)
 
     # -------------- CLEAN & SAVE --------------
-    df = df.dropna(subset=["close"]).reset_index(drop=True)
+    df = df.dropna().reset_index(drop=True)
 
     out_path = PROCESSED_DIR / f"{ticker}_tft.parquet"
     df.to_parquet(out_path, index=False)

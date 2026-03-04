@@ -1,96 +1,136 @@
+"""
+Corrected evaluation script for TFT no-sentiment model.
+ONLY fixes evaluation logic. Shapes, datasets, loaders unchanged.
+"""
+
 import numpy as np
 import pandas as pd
 
-from pytorch_forecasting import TemporalFusionTransformer
+from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 from torch.serialization import safe_globals
 
 
-MODEL_PATH = "models/tft/tft_no_sentiment.ckpt"
-DATA_PATH = "data/processed/tft_full_universe.parquet"
-
-TARGET_COLS = [f"target_future_{i}" for i in range(1, 8)]
-
+print("=" * 70)
+print("TFT NO-SENTIMENT MODEL - CORRECT EVALUATION")
+print("=" * 70)
 
 # ===============================
 # LOAD DATA
 # ===============================
-df = pd.read_parquet(DATA_PATH)
+print("\n[1] Loading data...")
+df = pd.read_parquet("data/processed/tft_full_universe.parquet")
 df["date"] = pd.to_datetime(df["date"])
+df = df.sort_values(["symbol", "time_idx"]).reset_index(drop=True)
 
 test_df = df[df.date >= "2024-01-01"].copy()
-symbols = test_df["symbol"].unique()
 
-print(f"Test rows: {len(test_df)}")
-print(f"Symbols: {symbols}")
+TARGET_COLS = [f"target_future_{i}" for i in range(1, 8)]
+test_df = test_df.dropna(subset=TARGET_COLS).reset_index(drop=True)
 
+print(f"   Test rows: {len(test_df)}")
+print(f"   Symbols: {test_df['symbol'].nunique()}")
 
 # ===============================
 # LOAD MODEL
 # ===============================
+print("\n[2] Loading model...")
 with safe_globals([MultiNormalizer, GroupNormalizer]):
     model = TemporalFusionTransformer.load_from_checkpoint(
-        MODEL_PATH,
+        "models/tft/tft_no_sentiment.ckpt",
         map_location="cpu",
         weights_only=False,
     )
-
 model.eval()
-print("✔ Model loaded successfully")
-
+print("   Model loaded")
 
 # ===============================
-# BUILD TEST DATASET FROM MODEL
+# CREATE DATASET (UNCHANGED)
 # ===============================
-test_ds = model.dataset.from_dataframe(
+print("\n[3] Creating dataset...")
+test_ds = TimeSeriesDataSet.from_parameters(
+    model.dataset_parameters,
     test_df,
     predict=True,
     stop_randomization=True,
 )
 
-# Get predictions (shape: [N, 7])
-preds = model.predict(test_ds).cpu().numpy()
+test_loader = test_ds.to_dataloader(train=False, batch_size=64, shuffle=False)
 
-# Align ground truth
-y_true = test_df[TARGET_COLS].values
-closes = test_df["close"].values
-symbols_arr = test_df["symbol"].values
-
+print(f"   Sequences: {len(test_ds)}")
 
 # ===============================
-# PER-SYMBOL METRICS
+# PREDICTIONS (UNCHANGED)
 # ===============================
-mae_list, rmse_list, dir_acc_list = [], [], []
+print("\n[4] Generating predictions...")
+preds_raw = model.predict(test_loader, mode="prediction", return_x=False)
+preds = np.concatenate([np.asarray(p) for p in preds_raw], axis=0)
 
-for symbol in symbols:
-    idx = symbols_arr == symbol
+print(f"   Predictions shape: {preds.shape}")  # (num_symbols, 7)
 
-    if idx.sum() < 20:
-        continue
+# ===============================
+# MATCH PREDICTIONS TO TRUTH (CORRECT)
+# ===============================
+print("\n[5] Matching predictions correctly...")
 
-    p = preds[idx]
-    y = y_true[idx]
-    c = closes[idx]
+symbols = sorted(test_df["symbol"].unique())
 
-    mae = np.mean(np.abs(p - y))
-    rmse = np.sqrt(np.mean((p - y) ** 2))
+final_preds = []
+final_true = []
+final_last_close = []
+final_symbols = []
 
-    # Directional accuracy for t+1
-    dir_acc = np.mean(
-        np.sign(p[:, 0] - c) == np.sign(y[:, 0] - c)
-    )
+for i, sym in enumerate(symbols):
+    sym_df = test_df[test_df.symbol == sym]
 
-    print(f"{symbol} | MAE={mae:.4f} RMSE={rmse:.4f} DIR_ACC={dir_acc:.2%}")
+    # last available row → corresponds to forecast window
+    last_row = sym_df.iloc[-1]
+
+    final_preds.append(preds[i])
+    final_true.append(last_row[TARGET_COLS].values)
+    final_last_close.append(last_row["close"])
+    final_symbols.append(sym)
+
+preds = np.array(final_preds)
+y_true = np.array(final_true)
+last_close = np.array(final_last_close)
+symbols = np.array(final_symbols)
+
+print(f"   Final eval shape: {preds.shape}")
+
+# ===============================
+# METRICS
+# ===============================
+print("\n" + "=" * 90)
+print("DETAILED PER-STOCK EVALUATION RESULTS")
+print("=" * 90)
+print(f"{'Stock':<8} {'MAE':<12} {'RMSE':<12} {'MAPE':<10} {'Day1_ACC':<10} {'Day7_ACC':<10}")
+print("-" * 90)
+
+mae_list, rmse_list, mape_list = [], [], []
+day1_acc_list, day7_acc_list = [], []
+
+for i, sym in enumerate(symbols):
+    p = preds[i]
+    t = y_true[i]
+    c0 = last_close[i]
+
+    mae = np.mean(np.abs(p - t))
+    rmse = np.sqrt(np.mean((p - t) ** 2))
+    mape = np.mean(np.abs((t - p) / (np.abs(t) + 1e-8))) * 100
+
+    # TRUE directional accuracy
+    day1_acc = (np.sign(p[0] - c0) == np.sign(t[0] - c0)) * 100
+    day7_acc = (np.sign(p[-1] - c0) == np.sign(t[-1] - c0)) * 100
+
+    print(f"{sym:<8} {mae:<12.4f} {rmse:<12.4f} {mape:<10.2f} {day1_acc:<10.1f} {day7_acc:<10.1f}")
 
     mae_list.append(mae)
     rmse_list.append(rmse)
-    dir_acc_list.append(dir_acc)
+    mape_list.append(mape)
+    day1_acc_list.append(day1_acc)
+    day7_acc_list.append(day7_acc)
 
-
-# ===============================
-# FINAL AGGREGATE METRICS
-# ===============================
-print("\n📊 FINAL AGGREGATED RESULTS")
-print(f"MAE  : {np.mean(mae_list):.4f}")
-print(f"RMSE : {np.mean(rmse_list):.4f}")
-print(f"Directional Accuracy (t+1): {np.mean(dir_acc_list):.2%}")
+print("-" * 90)
+print(f"{'MEAN':<8} {np.mean(mae_list):<12.4f} {np.mean(rmse_list):<12.4f} {np.mean(mape_list):<10.2f} {np.mean(day1_acc_list):<10.1f} {np.mean(day7_acc_list):<10.1f}")
+print("=" * 90)

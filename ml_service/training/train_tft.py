@@ -78,7 +78,6 @@ training_ds = TimeSeriesDataSet(
 
     time_varying_unknown_reals=[
         "open", "high", "low", "close", "volume",
-        "returns_pct", "log_returns",
         "high_low_spread", "open_close_spread",
         "rolling_mean_7", "rolling_std_7", "rolling_std_30",
         "EMA_20", "EMA_50", "SMA_20",
@@ -94,6 +93,7 @@ training_ds = TimeSeriesDataSet(
     max_encoder_length=MAX_ENCODER_LENGTH,
     max_prediction_length=MAX_PREDICTION_LENGTH,
 
+    # Multiple targets require MultiNormalizer; each is a log return
     target_normalizer=MultiNormalizer(
         [GroupNormalizer(groups=["symbol"]) for _ in range(7)]
     ),
