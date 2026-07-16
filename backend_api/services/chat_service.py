@@ -59,7 +59,7 @@ def _fetch_portfolio_summary(user_id: str) -> dict:
         }
 
 
-def chat(user_id: str, message: str) -> ChatReply:
+def chat(user_id: str, message: str, response_mode: str = "quick") -> ChatReply:
     if not message.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -86,6 +86,7 @@ def chat(user_id: str, message: str) -> ChatReply:
         user_id=user_id,
         message=message,
         portfolio_summary=portfolio_summary,
+        response_mode=response_mode,
     )
 
     # Enrich reply with proactive insights and health score

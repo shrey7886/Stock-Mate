@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
@@ -22,6 +23,34 @@ const QUICK_PROMPTS = [
   "Explain LTCG tax for stocks",
   "Suggest SIP strategy for 10k/month",
 ];
+
+const QUICK_MODE_CHIPS = [
+  "Top risk in one line",
+  "One action for today",
+  "Biggest loser?",
+  "Tax impact if I sell now",
+];
+
+const EXPLAIN_MODE_CHIPS = [
+  "Explain my allocation deeply",
+  "Full rebalance plan with why",
+  "Detailed SIP plan for my goal",
+  "Explain risk score components",
+];
+
+function buildDemoReply(message) {
+  const q = message.toLowerCase();
+  if (q.includes("health")) {
+    return "Your portfolio looks mostly fit, just cardio-averse.\nHealth: **74/100**.\nConcentration is a bit chunky in one bucket.\nWant a 2-step rebalance fix?";
+  }
+  if (q.includes("rebalance")) {
+    return "Current vibe: stylish, slightly over-accessorized.\nTrim the most overweight holding by ~8-10%.\nShift into 2 underweight sectors over 3 SIPs.\nWant exact split percentages?";
+  }
+  if (q.includes("tax") || q.includes("ltcg") || q.includes("stcg")) {
+    return "Tax reality check: profits are cute, taxes are clingy.\nLTCG and STCG treatment differ by holding period.\nHarvesting losses can reduce pain.\nWant a sell-order tax checklist?";
+  }
+  return "Money check: you're not broke, just in beta.\nMomentum is okay, risk is manageable.\nOne smart move today beats five panic moves tomorrow.\nWant a quick action plan?";
+}
 
 function TypingIndicator() {
   return (
@@ -151,9 +180,12 @@ function MessageBubble({ role, text, insights, healthScore, nextSteps, onNextSte
 }
 
 export default function ChatPage() {
+  const location = useLocation();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [mode, setMode] = useState("quick");
+  const [demoMode, setDemoMode] = useState(() => localStorage.getItem("sm_demo_mode") === "1");
   const [sessionId] = useState(() => crypto.randomUUID());
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -166,15 +198,42 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, sending, scrollToBottom]);
 
+  useEffect(() => {
+    if (location.state?.prefill) {
+      setInput(location.state.prefill);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    const onStorage = () => setDemoMode(localStorage.getItem("sm_demo_mode") === "1");
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const sendMessage = async (text) => {
     if (!text.trim() || sending) return;
     const userMsg = { role: "user", text: text.trim() };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setSending(true);
+    localStorage.setItem("sm_onboarding_first_chat", "1");
 
     try {
-      const data = await chat.send(text.trim(), sessionId);
+      if (demoMode) {
+        const aiMsg = {
+          role: "ai",
+          text: buildDemoReply(text.trim()),
+          insights: ["Demo mode is on. Connect broker for live personalized insights."],
+          nextSteps: ["Connect broker now", "Ask for live portfolio summary"],
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+        return;
+      }
+
+      const data = await chat.send(text.trim(), sessionId, mode);
+      if (data?.detected_intent === "goal_tracking") {
+        localStorage.setItem("sm_onboarding_goal_set", "1");
+      }
       const aiMsg = {
         role: "ai",
         text: data.answer || data.response || "I couldn't process that. Try again!",
@@ -223,13 +282,29 @@ export default function ChatPage() {
             <h1 className="text-lg font-semibold text-[var(--color-text-primary)] tracking-tight">Assistant</h1>
           </div>
         </div>
-        <button
-          onClick={handleClear}
-          className="p-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/20 transition-all duration-300 shadow-sm"
-          title="Clear conversation"
-        >
-          <Trash2 size={16} />
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center p-1 rounded-full bg-[var(--color-surface-overlay)] border border-[var(--color-border)]">
+            <button
+              onClick={() => setMode("quick")}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === "quick" ? "bg-[var(--color-brand)] text-white" : "text-[var(--color-text-secondary)]"}`}
+            >
+              Quick
+            </button>
+            <button
+              onClick={() => setMode("explain")}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === "explain" ? "bg-[var(--color-brand)] text-white" : "text-[var(--color-text-secondary)]"}`}
+            >
+              Explain
+            </button>
+          </div>
+          <button
+            onClick={handleClear}
+            className="p-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/20 transition-all duration-300 shadow-sm"
+            title="Clear conversation"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -265,6 +340,14 @@ export default function ChatPage() {
                   </button>
                 ))}
               </div>
+
+              <div className="mt-8 text-xs text-[var(--color-text-muted)]">
+                Reply mode: <span className="font-semibold text-[var(--color-text-secondary)]">{mode === "quick" ? "Quick" : "Explain"}</span>
+                <span className="ml-2">
+                  {mode === "quick" ? "• Snappy answers" : "• More detail, more reasoning"}
+                </span>
+                {demoMode && <span className="ml-2 text-[var(--color-brand)]">• Demo mode active</span>}
+              </div>
             </motion.div>
           </div>
         )}
@@ -295,13 +378,24 @@ export default function ChatPage() {
 
       {/* Input */}
       <div className="px-6 md:px-12 py-6 border-t border-[var(--color-border)] bg-[var(--color-surface-base)] relative z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+        <div className="max-w-4xl mx-auto flex flex-wrap gap-2 mb-4">
+          {(mode === "quick" ? QUICK_MODE_CHIPS : EXPLAIN_MODE_CHIPS).map((chip) => (
+            <button
+              key={chip}
+              onClick={() => sendMessage(chip)}
+              className="px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-brand)]/40 transition-all"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
         <form onSubmit={handleSubmit} className="flex items-center gap-4 max-w-4xl mx-auto">
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask Foleo anything..."
+            placeholder={mode === "quick" ? "Ask for the short version..." : "Ask for the full breakdown..."}
             disabled={sending}
             className="flex-1 px-6 py-4 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] text-base placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand)] focus:ring-4 focus:ring-[var(--color-brand)]/10 shadow-sm transition-all duration-300 disabled:opacity-60"
             autoFocus

@@ -84,6 +84,18 @@ class RAGRetriever:
             logger.warning("RAG retrieval failed: %s", exc)
             return []
 
+    def warmup(self) -> None:
+        """
+        Preload the vector DB + embedding model so first user query is faster.
+        Safe to call multiple times.
+        """
+        try:
+            _ = knowledge_base.chunk_count
+            _ = self.retrieve("portfolio warmup", intent="portfolio_summary", n_results=1, min_score=0.0)
+            logger.info("RAG warmup complete")
+        except Exception as exc:
+            logger.warning("RAG warmup failed: %s", exc)
+
 
 # Singleton
 rag_retriever = RAGRetriever()
