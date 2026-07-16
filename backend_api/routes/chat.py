@@ -23,7 +23,11 @@ def chat_message(payload: ChatRequest, current_user: dict = Depends(get_current_
     tax analysis, SIP advice, portfolio health score, and market overview.
     """
     user_id = current_user.get("sub")
-    reply = chat(user_id=user_id, message=payload.message)
+    reply = chat(
+        user_id=user_id,
+        message=payload.message,
+        response_mode=payload.response_mode or "quick",
+    )
 
     # Extract health score from analytics if available (passed via reply metadata)
     return ChatResponse(

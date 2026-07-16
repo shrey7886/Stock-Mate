@@ -56,10 +56,10 @@ export const portfolio = {
 
 /* ── Chat ─────────────────────────────────────────── */
 export const chat = {
-  send: (message, sessionId) =>
+  send: (message, sessionId, responseMode = "quick") =>
     request("/chat/message", {
       method: "POST",
-      body: JSON.stringify({ message, session_id: sessionId }),
+      body: JSON.stringify({ message, session_id: sessionId, response_mode: responseMode }),
     }),
   clearSession: () =>
     request("/chat/clear-session", { method: "POST" }),

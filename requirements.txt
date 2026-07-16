@@ -24,6 +24,9 @@ zstandard>=0.21.0  # For streaming .zst decompression
 # If you want to reference here, leave commented and install separately:
 # torch>=1.13
 
+# Time-series forecasting (PatchTST)
+neuralforecast>=1.7.0
+
 # Notes:
 # - If you won't use real APIs / FinBERT, you can remove `requests`, `tweepy`, `transformers`, and `torch`.
 # - The sample-data script only requires: pandas, numpy (and uses pyarrow if you read/write parquet).

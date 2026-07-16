@@ -160,6 +160,7 @@ class PortfolioExplanationPipeline:
         user_id: str,
         message: str,
         portfolio_summary: dict,
+        response_mode: str = "quick",
     ) -> ChatReply:
         detected_intent = classify_intent(message)
         holdings = portfolio_summary.get("holdings", [])
@@ -217,6 +218,7 @@ class PortfolioExplanationPipeline:
             user_message=message,
             portfolio_context=context,
             conversation_history=history,
+            response_mode=response_mode,
         )
 
         reply.detected_intent = detected_intent

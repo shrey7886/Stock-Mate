@@ -9,6 +9,8 @@ Each sequence produces 1 prediction for the 7-day horizon.
 import numpy as np
 import pandas as pd
 import torch
+import tempfile
+import os
 
 from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
@@ -35,9 +37,20 @@ print(f"   Unique symbols: {len(test_df['symbol'].unique())}")
 
 # Load model
 print("\n[2] Loading model...")
+# Sanitize legacy checkpoint typo: `monotone_constaints` -> remove stale key.
+ckpt_path = "models/tft/tft_leakage_safe_no_sentiment.ckpt"
+ckpt_obj = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+hyper_params = ckpt_obj.get("hyper_parameters", {})
+if "monotone_constaints" in hyper_params:
+    hyper_params.pop("monotone_constaints")
+
+fd, tmp_ckpt_path = tempfile.mkstemp(suffix=".ckpt")
+os.close(fd)
+torch.save(ckpt_obj, tmp_ckpt_path)
+
 with safe_globals([MultiNormalizer, GroupNormalizer]):
     model = TemporalFusionTransformer.load_from_checkpoint(
-        "models/tft/tft_leakage_safe_no_sentiment.ckpt",
+        tmp_ckpt_path,
         map_location="cpu",
         weights_only=False,
     )
@@ -167,3 +180,6 @@ print(f"MAPE             : {np.mean(mape_list):8.2f}% +/- {np.std(mape_list):5.2
 print(f"Directional Acc  : {np.mean(dir_acc_list):8.1f}% +/- {np.std(dir_acc_list):5.1f}%")
 print(f"Num sequences    : {len(mae_list)}")
 print("=" * 70)
+
+if os.path.exists(tmp_ckpt_path):
+    os.remove(tmp_ckpt_path)

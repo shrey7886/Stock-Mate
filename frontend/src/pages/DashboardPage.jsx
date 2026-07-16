@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   TrendingUp,
@@ -12,6 +12,8 @@ import {
   RefreshCw,
   AlertCircle,
   Link2,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { portfolio, chat } from "../services/api";
 import {
@@ -85,7 +87,8 @@ function HealthGauge({ score }) {
   );
 }
 
-function InsightCard({ insight }) {
+function InsightCard({ insight, onAction }) {
+  const actionLabel = insight.action || "Ask Foleo";
   return (
     <div className="flex items-start gap-4 p-5 rounded-2xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] hover:border-[var(--color-brand)]/30 hover:shadow-md transition-all duration-300">
       <div className="p-2 rounded-xl bg-[var(--color-brand)]/10 mt-1 shrink-0">
@@ -93,13 +96,68 @@ function InsightCard({ insight }) {
       </div>
       <div>
         <p className="text-[15px] text-[var(--color-text-primary)] leading-relaxed font-light">{insight.message || insight}</p>
-        {insight.action && (
-          <span className="inline-block mt-3 text-sm text-[var(--color-brand)] font-medium flex items-center gap-1 hover:gap-2 transition-all cursor-pointer">
-            {insight.action} <ArrowRight size={14} />
-          </span>
-        )}
+        <button
+          onClick={() => onAction(insight)}
+          className="inline-flex mt-3 text-sm text-[var(--color-brand)] font-medium items-center gap-1 hover:gap-2 transition-all"
+        >
+          {actionLabel} <ArrowRight size={14} />
+        </button>
       </div>
     </div>
+  );
+}
+
+function OnboardingChecklist({ items, demoMode, onToggleDemo }) {
+  const completed = items.filter((item) => item.done).length;
+  return (
+    <motion.div variants={itemVariants} className="glass-card p-6 md:p-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+        <div>
+          <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Getting Started</h2>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-2">{completed}/{items.length} complete</p>
+        </div>
+        <button
+          onClick={onToggleDemo}
+          className={`px-4 py-2 rounded-full text-xs font-semibold border transition-all ${demoMode ? "bg-[var(--color-brand)] text-white border-[var(--color-brand)]" : "bg-[var(--color-surface-overlay)] text-[var(--color-text-secondary)] border-[var(--color-border)]"}`}
+        >
+          {demoMode ? "Demo Mode On" : "Enable Demo Mode"}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {items.map((item) => (
+          <Link
+            key={item.label}
+            to={item.to}
+            className={`flex items-center justify-between px-4 py-3 rounded-xl border bg-[var(--color-surface-overlay)] hover:border-[var(--color-brand)]/40 transition-all ${item.done ? "border-[var(--color-border)]" : "border-[var(--color-brand)]/35 animate-pulse"}`}
+          >
+            <span className="flex items-center gap-3 text-sm text-[var(--color-text-primary)]">
+              {item.done ? <CheckSquare size={16} className="text-[var(--color-brand)]" /> : <Square size={16} className="text-[var(--color-text-muted)]" />}
+              {item.label}
+            </span>
+            <span className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)]">Open</span>
+          </Link>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function OnboardingCompleteCard() {
+  return (
+    <motion.div
+      variants={itemVariants}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="glass-card p-6 md:p-8 border border-[var(--color-brand)]/25 bg-[var(--color-brand)]/5"
+    >
+      <div className="flex items-center gap-3 mb-2">
+        <CheckSquare size={18} className="text-[var(--color-brand)]" />
+        <h2 className="text-sm font-bold uppercase tracking-[2px] text-[var(--color-brand)]">Onboarding Complete</h2>
+      </div>
+      <p className="text-[15px] text-[var(--color-text-primary)] leading-relaxed">
+        You are fully set up. Your app is now running in full-power mode.
+      </p>
+    </motion.div>
   );
 }
 
@@ -139,11 +197,13 @@ function _to_float(v) {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [portfolioData, setPortfolioData] = useState(null);
   const [insights, setInsights] = useState([]);
   const [loading, setLoading] = useState(true);
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [demoMode, setDemoMode] = useState(() => localStorage.getItem("sm_demo_mode") === "1");
 
   const fetchData = async () => {
     setLoading(true);
@@ -191,11 +251,58 @@ export default function DashboardPage() {
   const isLinked = portfolioData?.linked === true;
   const isLive = portfolioData?.data_status === "live";
   const needsRelink = portfolioData?.action_required === "relink_broker";
-  const pnl = portfolioData?.total_pnl ?? 0;
-  const pnlPct = portfolioData?.total_pnl_pct ?? 0;
-  const totalValue = portfolioData?.total_current_value ?? 0;
-  const holdings = portfolioData?.holdings || [];
-  const healthScore = portfolioData?.health_score;
+  const effectivePortfolioData = (!isLinked && demoMode)
+    ? {
+        ...portfolioData,
+        linked: true,
+        data_status: "demo",
+        total_current_value: 428650,
+        total_invested: 397200,
+        total_pnl: 31450,
+        total_pnl_pct: 7.92,
+        health_score: 74,
+        holdings: [
+          { tradingsymbol: "TCS", exchange: "NSE", quantity: 18, average_price: 3560, last_price: 3840 },
+          { tradingsymbol: "HDFCBANK", exchange: "NSE", quantity: 52, average_price: 1510, last_price: 1648 },
+          { tradingsymbol: "RELIANCE", exchange: "NSE", quantity: 24, average_price: 2620, last_price: 2745 },
+        ],
+      }
+    : portfolioData;
+  const effectiveInsights = (!isLinked && demoMode)
+    ? [
+        { message: "Demo insight: One sector is slightly overweight. Trim slowly, not dramatically.", action: "Create rebalance plan" },
+        { message: "Demo insight: SIP top-ups can improve risk-adjusted returns over 6-12 months.", action: "Build SIP plan" },
+      ]
+    : insights;
+
+  const effectiveIsLinked = effectivePortfolioData?.linked === true;
+  const effectiveNeedsRelink = effectivePortfolioData?.action_required === "relink_broker";
+  const pnl = effectivePortfolioData?.total_pnl ?? 0;
+  const pnlPct = effectivePortfolioData?.total_pnl_pct ?? 0;
+  const totalValue = effectivePortfolioData?.total_current_value ?? 0;
+  const holdings = effectivePortfolioData?.holdings || [];
+  const healthScore = effectivePortfolioData?.health_score;
+
+  const checklistItems = [
+    { label: "Connect broker", to: "/broker", done: isLinked },
+    { label: "Ask your first AI question", to: "/chat", done: localStorage.getItem("sm_onboarding_first_chat") === "1" },
+    { label: "Set your first goal", to: "/chat", done: localStorage.getItem("sm_onboarding_goal_set") === "1" },
+  ];
+  const showOnboarding = !isLinked || checklistItems.some((item) => !item.done);
+  const onboardingComplete = checklistItems.every((item) => item.done);
+
+  const handleToggleDemo = () => {
+    const next = !demoMode;
+    setDemoMode(next);
+    localStorage.setItem("sm_demo_mode", next ? "1" : "0");
+  };
+
+  const handleInsightAction = (insight) => {
+    const prompt = insight.action
+      ? `${insight.action}: ${insight.message || ""}`
+      : `Help me act on this insight: ${insight.message || ""}`;
+    navigate("/chat", { state: { prefill: prompt } });
+  };
 
   const sectorMap = {};
   holdings.forEach((h) => {
@@ -223,8 +330,10 @@ export default function DashboardPage() {
           <p className="text-sm text-[var(--color-text-secondary)] mt-3 font-light tracking-wide uppercase">
             {isLive
               ? `Live Data · ACC: ${portfolioData.account_id}`
-              : isLinked
+              : effectiveIsLinked
               ? `Broker linked · ${portfolioData?.data_status || 'syncing'}`
+              : demoMode
+              ? "Demo data · connect broker for live sync"
               : "Connect a broker to see live data"}
           </p>
         </div>
@@ -266,10 +375,14 @@ export default function DashboardPage() {
             <Shimmer className="h-80" />
           </div>
         </div>
-      ) : !isLinked && !needsRelink ? (
+      ) : !effectiveIsLinked && !effectiveNeedsRelink && !demoMode ? (
         <NoBrokerState />
       ) : (
         <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-8">
+          {showOnboarding && (
+            <OnboardingChecklist items={checklistItems} demoMode={demoMode} onToggleDemo={handleToggleDemo} />
+          )}
+          {!showOnboarding && onboardingComplete && <OnboardingCompleteCard />}
           
           {/* Stats grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
@@ -400,9 +513,11 @@ export default function DashboardPage() {
                 <div className="space-y-4">
                   {[...Array(2)].map((_, i) => <Shimmer key={i} className="h-24" />)}
                 </div>
-              ) : insights.length > 0 ? (
+              ) : effectiveInsights.length > 0 ? (
                 <div className="space-y-4">
-                  {insights.map((ins, i) => <InsightCard key={i} insight={ins} />)}
+                  {effectiveInsights.map((ins, i) => (
+                    <InsightCard key={i} insight={ins} onAction={handleInsightAction} />
+                  ))}
                 </div>
               ) : (
                 <div className="py-12 flex flex-col items-center justify-center text-center border border-dashed border-[var(--color-border-subtle)] rounded-2xl">

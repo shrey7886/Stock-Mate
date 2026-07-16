@@ -18,7 +18,7 @@ from backend_api.services.zerodha_service import zerodha_service
 
 router = APIRouter(prefix="/api/zerodha", tags=["zerodha"])
 
-FRONTEND_BROKER_URL = "http://localhost:5173/broker"
+FRONTEND_BROKER_URL = f"{settings.frontend_url.rstrip('/')}/broker"
 
 
 @router.get("/start", response_model=ZerodhaStartResponse)

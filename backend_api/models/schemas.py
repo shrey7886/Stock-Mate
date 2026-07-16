@@ -73,6 +73,7 @@ class RegisterResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     session_id: str | None = Field(default=None, description="Optional session override")
+    response_mode: str | None = Field(default="quick", description="quick | explain")
 
 
 class ChatResponse(BaseModel):
