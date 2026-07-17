@@ -170,3 +170,51 @@ class SectorAllocationResponse(BaseModel):
     over_concentrated: bool = False
     over_concentrated_sector: str | None = None
     over_concentrated_pct: float | None = None
+
+
+class StockFundamentals(BaseModel):
+    symbol: str
+    long_name: str | None = None
+    sector: str | None = None
+    market_cap: float | None = None
+    pe_ratio: float | None = None
+    forward_pe: float | None = None
+    dividend_yield: float | None = None
+    fifty_two_week_high: float | None = None
+    fifty_two_week_low: float | None = None
+    beta: float | None = None
+    currency: str | None = None
+
+
+class StockFinancialsResponse(BaseModel):
+    linked: bool
+    data_status: str
+    message: str
+    symbol: str
+    action_required: str | None = None
+    link_endpoint: str | None = None
+    holding: dict | None = None
+    fundamentals: StockFundamentals | None = None
+
+
+class IndexSnapshot(BaseModel):
+    symbol: str
+    label: str
+    price: float
+    change: float
+    change_pct: float
+
+
+class HoldingMover(BaseModel):
+    symbol: str
+    change_pct: float
+    current_value: float
+
+
+class MarketOverviewResponse(BaseModel):
+    linked: bool
+    data_status: str
+    message: str
+    indices: list[IndexSnapshot] = []
+    top_gainers: list[HoldingMover] = []
+    top_losers: list[HoldingMover] = []

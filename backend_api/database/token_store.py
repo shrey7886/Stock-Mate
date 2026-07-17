@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hmac
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -95,6 +96,16 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL UNIQUE,
                 sector TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentals_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL UNIQUE,
+                data_json TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -643,3 +654,49 @@ def get_stale_or_missing_sectors(*, symbols: list[str], max_age_days: int = 7) -
         ).fetchall()
     fresh = {row[0] for row in rows}
     return [s for s in symbols if s not in fresh]
+
+
+# ── Fundamentals cache ───────────────────────────────────────────────────────
+
+def get_cached_fundamentals(*, symbol: str) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT symbol, data_json, updated_at FROM fundamentals_cache WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row[1]) if row[1] else None
+    except (TypeError, ValueError):
+        data = None
+    return {"symbol": row[0], "data": data, "updated_at": row[2]}
+
+
+def upsert_fundamentals_cache(*, symbol: str, data: dict | None) -> None:
+    data_json = json.dumps(data) if data is not None else None
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO fundamentals_cache (symbol, data_json)
+            VALUES (?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                data_json=excluded.data_json,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (symbol, data_json),
+        )
+        conn.commit()
+
+
+def is_fundamentals_stale_or_missing(*, symbol: str, max_age_days: int = 1) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT symbol FROM fundamentals_cache
+            WHERE symbol = ?
+              AND updated_at >= datetime('now', ?)
+            """,
+            (symbol, f"-{max_age_days} days"),
+        ).fetchone()
+    return row is None

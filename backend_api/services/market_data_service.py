@@ -93,5 +93,58 @@ class MarketDataService:
                 logger.warning("yfinance sector fetch failed for %s%s: %s", base_symbol, suffix, exc)
         return None
 
+    def fetch_fundamentals(self, base_symbol: str) -> dict | None:
+        if not _HAS_YFINANCE:
+            return None
+
+        for suffix in (".NS", ".BO"):
+            try:
+                ticker = yf.Ticker(f"{base_symbol}{suffix}")
+                info = ticker.info
+                if not isinstance(info, dict) or not info:
+                    continue
+                return {
+                    "long_name": info.get("longName"),
+                    "sector": info.get("sector"),
+                    "market_cap": info.get("marketCap"),
+                    "pe_ratio": info.get("trailingPE"),
+                    "forward_pe": info.get("forwardPE"),
+                    "dividend_yield": info.get("dividendYield"),
+                    "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+                    "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+                    "beta": info.get("beta"),
+                    "currency": info.get("currency"),
+                }
+            except Exception as exc:
+                logger.warning("yfinance fundamentals fetch failed for %s%s: %s", base_symbol, suffix, exc)
+        return None
+
+    def fetch_index_snapshot(self, ticker_symbol: str, label: str) -> dict | None:
+        if not _HAS_YFINANCE:
+            return None
+
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            hist = ticker.history(period="5d")
+            if hist is None or hist.empty or len(hist) < 2:
+                return None
+            closes = hist["Close"].dropna()
+            if len(closes) < 2:
+                return None
+            price = float(closes.iloc[-1])
+            prior = float(closes.iloc[-2])
+            change = price - prior
+            change_pct = (change / prior * 100.0) if prior else 0.0
+            return {
+                "symbol": ticker_symbol,
+                "label": label,
+                "price": round(price, 2),
+                "change": round(change, 2),
+                "change_pct": round(change_pct, 2),
+            }
+        except Exception as exc:
+            logger.warning("yfinance index snapshot fetch failed for %s: %s", ticker_symbol, exc)
+            return None
+
 
 market_data_service = MarketDataService()
