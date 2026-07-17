@@ -146,6 +146,20 @@ class MarketDataService:
             logger.warning("yfinance index snapshot fetch failed for %s: %s", ticker_symbol, exc)
             return None
 
+    def get_current_price(self, base_symbol: str) -> float | None:
+        if not _HAS_YFINANCE:
+            return None
+
+        for suffix in (".NS", ".BO"):
+            try:
+                ticker = yf.Ticker(f"{base_symbol}{suffix}")
+                hist = ticker.history(period="1d")
+                if hist is not None and not hist.empty:
+                    return float(hist["Close"].iloc[-1])
+            except Exception as exc:
+                logger.warning("yfinance price fetch failed for %s%s: %s", base_symbol, suffix, exc)
+        return None
+
     def fetch_news(self, base_symbol: str, limit: int = 8) -> list[dict] | None:
         if not _HAS_YFINANCE:
             return None

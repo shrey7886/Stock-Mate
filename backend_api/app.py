@@ -12,8 +12,11 @@ from backend_api.routes.user import router as user_router
 from backend_api.routes.zerodha import router as zerodha_router
 from backend_api.routes.upstox import router as upstox_router
 from backend_api.routes.inference import router as inference_router
+from backend_api.routes.alerts import router as alerts_router
+from backend_api.services.alert_service import check_alerts
 
 logger = logging.getLogger(__name__)
+scheduler = None
 
 
 def _warmup_chat_stack() -> None:
@@ -56,10 +59,19 @@ def create_app() -> FastAPI:
 	app.include_router(zerodha_router)
 	app.include_router(upstox_router)
 	app.include_router(inference_router)
+	app.include_router(alerts_router)
 
 	@app.on_event("startup")
 	def _startup_warmup() -> None:
 		threading.Thread(target=_warmup_chat_stack, daemon=True).start()
+
+		global scheduler
+		if scheduler is None:
+			from apscheduler.schedulers.background import BackgroundScheduler
+
+			scheduler = BackgroundScheduler()
+			scheduler.add_job(check_alerts, "interval", minutes=15, id="check_price_alerts", replace_existing=True)
+			scheduler.start()
 
 	return app
 

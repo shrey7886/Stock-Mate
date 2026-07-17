@@ -141,6 +141,22 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                target_price REAL NOT NULL,
+                direction TEXT NOT NULL CHECK(direction IN ('above', 'below')),
+                is_triggered INTEGER NOT NULL DEFAULT 0,
+                is_read INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                triggered_at TIMESTAMP,
+                UNIQUE(user_id, symbol, direction)
+            )
+            """
+        )
         for theme, description, symbols in _SEED_BASKETS:
             conn.execute(
                 """
@@ -798,3 +814,115 @@ def get_all_baskets() -> list[dict]:
         {"theme": row[0], "description": row[1], "symbols": json.loads(row[2])}
         for row in rows
     ]
+
+
+# ── Price alerts ──────────────────────────────────────────────────────────
+
+def _row_to_alert(row) -> dict:
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "symbol": row[2],
+        "target_price": row[3],
+        "direction": row[4],
+        "is_triggered": bool(row[5]),
+        "is_read": bool(row[6]),
+        "created_at": row[7],
+        "triggered_at": row[8],
+    }
+
+
+def create_price_alert(*, user_id: str, symbol: str, target_price: float, direction: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO price_alerts (user_id, symbol, target_price, direction, is_triggered, is_read, triggered_at)
+            VALUES (?, ?, ?, ?, 0, 1, NULL)
+            ON CONFLICT(user_id, symbol, direction) DO UPDATE SET
+                target_price=excluded.target_price,
+                is_triggered=0,
+                is_read=1,
+                triggered_at=NULL,
+                created_at=CURRENT_TIMESTAMP
+            """,
+            (user_id, symbol, target_price, direction),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM price_alerts WHERE user_id = ? AND symbol = ? AND direction = ?",
+            (user_id, symbol, direction),
+        ).fetchone()
+    return row[0]
+
+
+def list_price_alerts(*, user_id: str) -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, symbol, target_price, direction, is_triggered, is_read, created_at, triggered_at
+            FROM price_alerts
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [_row_to_alert(row) for row in rows]
+
+
+def list_all_active_alerts() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, symbol, target_price, direction, is_triggered, is_read, created_at, triggered_at
+            FROM price_alerts
+            WHERE is_triggered = 0
+            """
+        ).fetchall()
+    return [_row_to_alert(row) for row in rows]
+
+
+def delete_price_alert(*, user_id: str, alert_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "DELETE FROM price_alerts WHERE id = ? AND user_id = ?",
+            (alert_id, user_id),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def mark_alert_triggered(*, alert_id: int) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE price_alerts
+            SET is_triggered = 1, is_read = 0, triggered_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (alert_id,),
+        )
+        conn.commit()
+
+
+def dismiss_alert(*, user_id: str, alert_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "UPDATE price_alerts SET is_read = 1 WHERE id = ? AND user_id = ?",
+            (alert_id, user_id),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def reset_alert(*, user_id: str, alert_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            """
+            UPDATE price_alerts
+            SET is_triggered = 0, is_read = 1, triggered_at = NULL
+            WHERE id = ? AND user_id = ?
+            """,
+            (alert_id, user_id),
+        )
+        conn.commit()
+    return cur.rowcount > 0

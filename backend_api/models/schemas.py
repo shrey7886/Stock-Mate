@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -263,3 +265,20 @@ class ThemedBasketsResponse(BaseModel):
     data_status: str
     message: str
     baskets: list[ThemedBasket] = []
+
+
+class PriceAlertCreate(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=20)
+    target_price: float = Field(..., gt=0)
+    direction: Literal["above", "below"]
+
+
+class PriceAlertResponse(BaseModel):
+    id: int
+    symbol: str
+    target_price: float
+    direction: str
+    is_triggered: bool
+    is_read: bool
+    created_at: str | None = None
+    triggered_at: str | None = None

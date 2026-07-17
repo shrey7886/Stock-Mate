@@ -12,17 +12,22 @@ import {
   Moon,
   Sun,
   Newspaper,
-  LayoutGrid
+  LayoutGrid,
+  Bell,
+  Check,
+  RotateCcw,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import FoleoLogo from "./FoleoLogo";
+import { alerts } from "../services/api";
 
 const NAV_ITEMS = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Portfolio" },
   { to: "/chat", icon: MessageCircle, label: "Assistant" },
   { to: "/news", icon: Newspaper, label: "News" },
   { to: "/baskets", icon: LayoutGrid, label: "Baskets" },
+  { to: "/alerts", icon: Bell, label: "Alerts" },
   { to: "/broker", icon: Link2, label: "Broker" },
 ];
 
@@ -41,6 +46,115 @@ function SidebarLink({ to, icon: Icon, label, onClick }) {
       <Icon size={17} strokeWidth={1.8} />
       <span>{label}</span>
     </NavLink>
+  );
+}
+
+function AlertBell() {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  const fetchAlerts = async () => {
+    try {
+      const res = await alerts.list();
+      setItems(res || []);
+    } catch {
+      // silently ignore — notification bell should never break the app shell
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const unread = items.filter((a) => a.is_triggered && !a.is_read);
+
+  const handleDismiss = async (id) => {
+    try {
+      await alerts.dismiss(id);
+      fetchAlerts();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleReset = async (id) => {
+    try {
+      await alerts.reset(id);
+      fetchAlerts();
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="relative p-2 rounded-xl bg-[var(--color-surface-overlay)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-all duration-300 shadow-sm border border-[var(--color-border)]"
+        title="Alerts"
+      >
+        <Bell size={14} />
+        {unread.length > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+            {unread.length > 9 ? "9+" : unread.length}
+          </span>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -8, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.97 }}
+            transition={{ duration: 0.2 }}
+            className="absolute bottom-full mb-2 left-0 w-80 max-h-96 overflow-y-auto glass-card p-3 shadow-2xl z-50"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-[2px] text-[var(--color-text-muted)] px-2 py-1">
+              Triggered Alerts
+            </p>
+            {unread.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)] px-2 py-4 text-center">No new alerts.</p>
+            ) : (
+              <div className="space-y-1.5 mt-1">
+                {unread.map((a) => (
+                  <div key={a.id} className="p-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)]">
+                    <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                      {a.symbol} crossed {a.direction} ₹{a.target_price}
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        onClick={() => handleDismiss(a.id)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-raised)] transition-colors"
+                      >
+                        <Check size={12} /> Dismiss
+                      </button>
+                      <button
+                        onClick={() => handleReset(a.id)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[var(--color-text-secondary)] hover:text-amber-500 hover:bg-amber-500/10 transition-colors"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -81,13 +195,16 @@ export default function AppShell({ children }) {
       <div className="px-5 py-5 border-t border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-4">
           <span className="text-[11px] font-bold uppercase tracking-[2px] text-[var(--color-text-muted)] ml-2">Theme</span>
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-xl bg-[var(--color-surface-overlay)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-all duration-300 shadow-sm border border-[var(--color-border)] flex items-center gap-2"
-            title="Toggle Theme"
-          >
-            {isDark ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
+          <div className="flex items-center gap-2">
+            <AlertBell />
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-xl bg-[var(--color-surface-overlay)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-all duration-300 shadow-sm border border-[var(--color-border)] flex items-center gap-2"
+              title="Toggle Theme"
+            >
+              {isDark ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+          </div>
         </div>
         <div className="flex items-center justify-between bg-[var(--color-surface-card)] rounded-2xl p-3 border border-[var(--color-border-subtle)]">
           <div className="min-w-0 flex items-center gap-3">
