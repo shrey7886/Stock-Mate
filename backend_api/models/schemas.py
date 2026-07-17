@@ -32,6 +32,18 @@ class ZerodhaStatusResponse(BaseModel):
     accounts: list[LinkedBrokerAccount] = Field(default_factory=list)
 
 
+class UpstoxStartResponse(BaseModel):
+    login_url: str = Field(..., description="Upstox authorization URL")
+    state: str = Field(..., description="CSRF state token")
+
+
+class UpstoxStatusResponse(BaseModel):
+    linked: bool
+    provider: str = "upstox"
+    linked_accounts_count: int = 0
+    accounts: list[LinkedBrokerAccount] = Field(default_factory=list)
+
+
 class ActionResponse(BaseModel):
     success: bool
     message: str

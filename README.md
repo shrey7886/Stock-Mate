@@ -1,11 +1,11 @@
 # Stock-Mate
 
-Stock-Mate is an AI-powered portfolio dashboard that connects to your Zerodha brokerage account and gives you a live view of your holdings, an AI chat assistant for portfolio questions, and market analytics — performance vs. NIFTY 50, sector allocation with concentration alerts, per-stock fundamentals, a market overview widget, a news digest, themed stock baskets, and more.
+Stock-Mate is an AI-powered portfolio dashboard that connects to your Zerodha and/or Upstox brokerage accounts and gives you a live, consolidated view of your holdings, an AI chat assistant for portfolio questions, and market analytics — performance vs. NIFTY 50, sector allocation with concentration alerts, per-stock fundamentals, a market overview widget, a news digest, themed stock baskets, and more.
 
 ## How It Works
 
-1. **Connect your portfolio** — link your Zerodha account via Kite Connect OAuth
-2. **Live holdings** — the dashboard pulls your current holdings, P&L, and portfolio health score directly from Zerodha
+1. **Connect your portfolio** — link your Zerodha account via Kite Connect OAuth, your Upstox account via Upstox OAuth, or both — holdings from every connected broker are merged into one consolidated view, tagged by broker
+2. **Live holdings** — the dashboard pulls your current holdings, P&L, and portfolio health score directly from your linked broker(s)
 3. **Market analytics** — portfolio performance is benchmarked against NIFTY 50, holdings are broken down by sector with over-concentration warnings, and a market overview widget shows NIFTY 50/SENSEX levels plus your top gainers/losers
 4. **Stock financials** — click any holding to see its fundamentals (P/E, market cap, dividend yield, 52-week range, beta) alongside your own position in that stock
 5. **News & baskets** — a News page shows the latest headlines for your top holdings, and a Baskets page groups stocks into curated themes (EV, Banking, IT Services, and more), highlighting which ones you already hold
@@ -31,7 +31,7 @@ Data is stored in a local SQLite database (`backend_api/database/backend.db`, cr
 - **News digest** — latest headlines for your top holdings (or a default watchlist if unlinked), fetched from yfinance and cached daily
 - **Themed stock baskets** — curated stock groupings by theme (EV, Banking, IT Services, Pharma, FMCG, and more), with your own holdings highlighted
 - **AI chat assistant** — natural-language portfolio Q&A with action tags (Hold/Trim/Add/Watch/Rebalance) and proactive insights
-- **Zerodha account linking** — OAuth-based linking/unlinking, multiple accounts, primary account selection
+- **Zerodha & Upstox account linking** — OAuth-based linking/unlinking for both brokers, multiple accounts per broker, primary account selection, holdings from every connected broker merged into one portfolio and badged by source
 
 ## Prerequisites
 
@@ -39,7 +39,8 @@ Install these before running the app:
 
 - **Python 3.10+** (required — `backend_api/models/schemas.py` uses `X | None` type syntax that is not supported on Python 3.9)
 - **Node.js 18+** and npm (for the Vite/React frontend)
-- A **Zerodha Kite Connect** developer app (API key + secret) — [https://developers.kite.trade](https://developers.kite.trade) — needed to link a real brokerage account
+- A **Zerodha Kite Connect** developer app (API key + secret) — [https://developers.kite.trade](https://developers.kite.trade) — needed to link a real Zerodha account
+- Optional: an **Upstox** developer app (API key + secret) — [https://upstox.com/developer](https://upstox.com/developer) — needed to link a real Upstox account
 - Optional: a **Groq** or **OpenAI** API key to power the AI chat assistant (the app defaults to Groq, which has a free tier)
 
 No Docker and no external database are required to run the app locally.
@@ -73,6 +74,11 @@ ZERODHA_API_KEY=your-kite-api-key
 ZERODHA_API_SECRET=your-kite-api-secret
 ZERODHA_REDIRECT_URL=http://localhost:8000/api/zerodha/callback
 
+# Upstox
+UPSTOX_API_KEY=your-upstox-api-key
+UPSTOX_API_SECRET=your-upstox-api-secret
+UPSTOX_REDIRECT_URL=http://localhost:8000/api/upstox/callback
+
 # LLM provider for the chat assistant: "groq" (free) or "openai"
 LLM_PROVIDER=groq
 GROQ_API_KEY=your-groq-api-key
@@ -96,6 +102,12 @@ npm run dev
 ```
 
 The dashboard is served at `http://localhost:5174` and proxies API calls to the backend.
+
+## Broker notes
+
+- Holdings from every broker you've linked (Zerodha, Upstox) are fetched and merged into a single consolidated portfolio for all analytics — sector allocation, benchmark, news digest, and stock financials all operate on the merged set automatically.
+- Each holding is tagged with its source broker and shown with a small "Zerodha"/"Upstox" badge in the holdings tables.
+- If you only link one broker, everything works exactly as before; if a linked broker's token expires or is invalid, that broker's holdings are simply omitted from the merge (with a reconnect prompt) rather than failing the whole page.
 
 ## Market data notes
 

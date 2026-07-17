@@ -35,6 +35,7 @@ from backend_api.models.schemas import (
 from backend_api.services.broker_token_service import broker_token_service
 from backend_api.services.market_data_service import market_data_service
 from backend_api.services.zerodha_service import zerodha_service
+from backend_api.services.upstox_service import upstox_service
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
@@ -42,51 +43,80 @@ VALID_PERIODS = {"1M", "3M", "6M", "1Y"}
 SECTOR_CONCENTRATION_THRESHOLD_PCT = 40.0
 DEFAULT_NEWS_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
+_PROVIDERS = ("zerodha", "upstox")
+_PROVIDER_SERVICES = {"zerodha": zerodha_service, "upstox": upstox_service}
+
 
 def _get_live_holdings(user_id: str) -> tuple[list[dict] | None, dict]:
     """
-    Shared helper: fetch live holdings the same way /summary does.
-    Returns (holdings_or_None, short_circuit_fields). If holdings is None,
-    short_circuit_fields contains linked/data_status/action_required/link_endpoint/message
-    to return directly from the caller.
+    Shared helper: fetch and merge live holdings from every broker linked
+    for this user. Returns (holdings_or_None, short_circuit_fields). If
+    holdings is None, short_circuit_fields contains
+    linked/data_status/action_required/link_endpoint/message to return
+    directly from the caller. Each holding dict is tagged with "_source"
+    ("zerodha" or "upstox") so downstream consumers can badge/attribute it.
     """
-    linked = broker_token_service.has_linked_account(user_id=user_id, provider="zerodha")
-    if not linked:
+    merged: list[dict] = []
+    any_linked = False
+    last_meta: dict = {}
+
+    for provider in _PROVIDERS:
+        if not broker_token_service.has_linked_account(user_id=user_id, provider=provider):
+            continue
+        any_linked = True
+
+        tokens = broker_token_service.get_linked_tokens(user_id=user_id, provider=provider)
+        if not tokens or not tokens.get("access_token"):
+            last_meta = {
+                "linked": True,
+                "data_status": "token_missing",
+                "action_required": "relink_broker",
+                "link_endpoint": f"/api/{provider}/start",
+                "message": f"{provider.capitalize()} linked, but token is unavailable. Reconnect {provider.capitalize()}.",
+            }
+            continue
+
+        service = _PROVIDER_SERVICES[provider]
+        try:
+            holdings = service.fetch_holdings(access_token=tokens.get("access_token", ""))
+        except Exception as exc:
+            if service.is_relink_required_error(exc):
+                last_meta = {
+                    "linked": True,
+                    "data_status": "relink_required",
+                    "action_required": "relink_broker",
+                    "link_endpoint": f"/api/{provider}/start",
+                    "message": f"{provider.capitalize()} token expired or invalid. Reconnect {provider.capitalize()}.",
+                }
+            else:
+                last_meta = {
+                    "linked": True,
+                    "data_status": "broker_api_unavailable",
+                    "message": f"{provider.capitalize()} linked, but live portfolio fetch is temporarily unavailable: {exc}",
+                }
+            continue
+
+        for holding in holdings:
+            holding["_source"] = provider
+        merged.extend(holdings)
+
+    if not any_linked:
         return None, {
             "linked": False,
             "data_status": "not_linked",
             "action_required": "link_broker",
             "link_endpoint": "/api/zerodha/start",
-            "message": "Broker not linked. Start Zerodha linking flow.",
+            "message": "Broker not linked. Start Zerodha or Upstox linking flow.",
         }
 
-    tokens = broker_token_service.get_linked_tokens(user_id=user_id, provider="zerodha")
-    if not tokens or not tokens.get("access_token"):
-        return None, {
-            "linked": True,
-            "data_status": "token_missing",
-            "action_required": "relink_broker",
-            "link_endpoint": "/api/zerodha/start",
-            "message": "Broker linked, but token is unavailable. Reconnect Zerodha.",
-        }
-
-    try:
-        holdings = zerodha_service.fetch_holdings(access_token=tokens.get("access_token", ""))
-        return holdings, {}
-    except Exception as exc:
-        if zerodha_service.is_relink_required_error(exc):
-            return None, {
-                "linked": True,
-                "data_status": "relink_required",
-                "action_required": "relink_broker",
-                "link_endpoint": "/api/zerodha/start",
-                "message": "Broker token expired or invalid. Reconnect Zerodha.",
-            }
-        return None, {
+    if not merged:
+        return None, last_meta or {
             "linked": True,
             "data_status": "broker_api_unavailable",
-            "message": f"Broker linked, but live portfolio fetch is temporarily unavailable: {exc}",
+            "message": "Broker linked, but live portfolio fetch is temporarily unavailable.",
         }
+
+    return merged, {}
 
 
 def _to_float(value: object, default: float = 0.0) -> float:
@@ -141,63 +171,22 @@ def _compute_health_score(holdings: list[dict], aggregate: dict) -> float | None
 @router.get("/summary")
 def portfolio_summary(current_user: dict = Depends(get_current_user)) -> PortfolioSummaryResponse:
     user_id = str(current_user.get("sub"))
-    linked = broker_token_service.has_linked_account(user_id=user_id, provider="zerodha")
 
-    if not linked:
-        return PortfolioSummaryResponse(
-            user_id=user_id,
-            linked=False,
-            data_status="not_linked",
-            action_required="link_broker",
-            link_endpoint="/api/zerodha/start",
-            message="Broker not linked. Start Zerodha linking flow.",
-        )
+    holdings, short_circuit = _get_live_holdings(user_id)
+    if holdings is None:
+        return PortfolioSummaryResponse(user_id=user_id, **short_circuit)
 
-    tokens = broker_token_service.get_linked_tokens(user_id=user_id, provider="zerodha")
-    if not tokens or not tokens.get("access_token"):
-        return PortfolioSummaryResponse(
-            user_id=user_id,
-            linked=True,
-            account_id=tokens.get("account_id") if tokens else None,
-            data_status="token_missing",
-            action_required="relink_broker",
-            link_endpoint="/api/zerodha/start",
-            message="Broker linked, but token is unavailable. Reconnect Zerodha.",
-        )
-
-    try:
-        holdings = zerodha_service.fetch_holdings(access_token=tokens.get("access_token", ""))
-        aggregate = _aggregate_holdings(holdings)
-        health_score = _compute_health_score(holdings, aggregate)
-        return PortfolioSummaryResponse(
-            user_id=user_id,
-            linked=True,
-            account_id=tokens.get("account_id"),
-            data_status="live",
-            message="Live portfolio summary from Zerodha.",
-            holdings=holdings,
-            health_score=health_score,
-            **aggregate,
-        )
-    except Exception as exc:
-        if zerodha_service.is_relink_required_error(exc):
-            return PortfolioSummaryResponse(
-                user_id=user_id,
-                linked=True,
-                account_id=tokens.get("account_id"),
-                data_status="relink_required",
-                action_required="relink_broker",
-                link_endpoint="/api/zerodha/start",
-                message="Broker token expired or invalid. Reconnect Zerodha.",
-            )
-
-        return PortfolioSummaryResponse(
-            user_id=user_id,
-            linked=True,
-            account_id=tokens.get("account_id"),
-            data_status="broker_api_unavailable",
-            message=f"Broker linked, but live portfolio fetch is temporarily unavailable: {exc}",
-        )
+    aggregate = _aggregate_holdings(holdings)
+    health_score = _compute_health_score(holdings, aggregate)
+    return PortfolioSummaryResponse(
+        user_id=user_id,
+        linked=True,
+        data_status="live",
+        message="Live portfolio summary.",
+        holdings=holdings,
+        health_score=health_score,
+        **aggregate,
+    )
 
 
 

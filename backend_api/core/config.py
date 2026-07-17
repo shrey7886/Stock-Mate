@@ -19,6 +19,13 @@ class Settings:
     zerodha_redirect_url: str = os.getenv(
         "ZERODHA_REDIRECT_URL", "http://localhost:8000/api/zerodha/callback"
     )
+
+    upstox_api_key: str = os.getenv("UPSTOX_API_KEY", "")
+    upstox_api_secret: str = os.getenv("UPSTOX_API_SECRET", "")
+    upstox_redirect_url: str = os.getenv(
+        "UPSTOX_REDIRECT_URL", "http://localhost:8000/api/upstox/callback"
+    )
+
     jwt_secret: str = os.getenv("JWT_SECRET", "change-me-in-prod")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_exp_minutes: int = int(os.getenv("JWT_EXP_MINUTES", "120"))
