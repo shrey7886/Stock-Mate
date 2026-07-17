@@ -17,11 +17,10 @@ import remarkGfm from "remark-gfm";
 import FoleoLogo from "../components/FoleoLogo";
 
 const QUICK_PROMPTS = [
-  "How's my portfolio health?",
-  "What sectors am I overweight in?",
-  "Should I rebalance?",
-  "Explain LTCG tax for stocks",
-  "Suggest SIP strategy for 10k/month",
+  "How diversified is my portfolio?",
+  "What is my riskiest holding right now?",
+  "Suggest stocks to replace my worst performer",
+  "Am I overexposed to any sector?",
 ];
 
 const QUICK_MODE_CHIPS = [

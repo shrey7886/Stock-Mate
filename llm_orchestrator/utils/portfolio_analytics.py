@@ -22,25 +22,29 @@ def compute_portfolio_health_score(
     total_pnl_pct: float,
     risk_flags: list[str],
     diversification_score: float,
+    sector_count: int = 0,
+    portfolio_beta: float | None = None,
 ) -> dict:
     """
-    Composite health score (0–100) with four components:
-    • Diversification  (30 pts): holdings spread + concentration
-    • Performance      (30 pts): portfolio-level P&L %
-    • Risk mgmt        (25 pts): absence of risk flags
+    Composite health score (0–100) with six components:
+    • Diversification  (20 pts): holdings spread + concentration
+    • Performance      (25 pts): portfolio-level P&L %
+    • Risk mgmt        (20 pts): absence of risk flags
     • Concentration    (15 pts): single-stock weight penalty
+    • Sector spread    (10 pts): number of distinct sectors held
+    • Beta fit         (10 pts): how close portfolio beta is to market-neutral (~1.0)
     """
-    # — Diversification component (0–30) ————————————————————————
-    div_score = min(diversification_score / 100.0, 1.0) * 30.0
+    # — Diversification component (0–20) ————————————————————————
+    div_score = min(diversification_score / 100.0, 1.0) * 20.0
 
-    # — Performance component (0–30) —————————————————————————————
-    # Sigmoid-like mapping: -20%→0, 0%→15, +20%→30
+    # — Performance component (0–25) —————————————————————————————
+    # Sigmoid-like mapping: -20%→0, 0%→12.5, +20%→25
     perf_clamped = max(-20.0, min(20.0, total_pnl_pct))
-    perf_score = ((perf_clamped + 20.0) / 40.0) * 30.0
+    perf_score = ((perf_clamped + 20.0) / 40.0) * 25.0
 
-    # — Risk management component (0–25) ————————————————————————
-    penalty_per_flag = 8.0
-    risk_score = max(0.0, 25.0 - len(risk_flags) * penalty_per_flag)
+    # — Risk management component (0–20) ————————————————————————
+    penalty_per_flag = 6.5
+    risk_score = max(0.0, 20.0 - len(risk_flags) * penalty_per_flag)
 
     # — Concentration component (0–15) ——————————————————————————
     if concentration_top1_pct >= 70:
@@ -52,7 +56,21 @@ def compute_portfolio_health_score(
     else:
         conc_score = 15.0
 
-    total = round(div_score + perf_score + risk_score + conc_score, 1)
+    # — Sector spread component (0–10) ———————————————————————————
+    # 4+ distinct sectors held → full marks
+    sector_score = min(sector_count / 4.0, 1.0) * 10.0
+
+    # — Beta fit component (0–10) ————————————————————————————————
+    if portfolio_beta is None:
+        beta_score = 5.0
+    elif 0.8 <= portfolio_beta <= 1.2:
+        beta_score = 10.0
+    elif 0.5 <= portfolio_beta < 0.8 or 1.2 < portfolio_beta <= 1.6:
+        beta_score = 6.0
+    else:
+        beta_score = 2.0
+
+    total = round(div_score + perf_score + risk_score + conc_score + sector_score + beta_score, 1)
     total = max(0.0, min(100.0, total))
 
     if total >= 80:
@@ -75,6 +93,8 @@ def compute_portfolio_health_score(
             "performance": round(perf_score, 1),
             "risk_management": round(risk_score, 1),
             "concentration": round(conc_score, 1),
+            "sector_spread": round(sector_score, 1),
+            "beta_fit": round(beta_score, 1),
         },
     }
 
@@ -298,6 +318,8 @@ def build_portfolio_analytics(
     total_current_value: float,
     total_pnl: float,
     total_pnl_pct: float,
+    sector_count: int = 0,
+    portfolio_beta: float | None = None,
 ) -> dict:
     if not holdings:
         return {
@@ -308,6 +330,7 @@ def build_portfolio_analytics(
             "concentration_top1_pct": 0.0,
             "concentration_top3_pct": 0.0,
             "diversification_score": 0.0,
+            "portfolio_beta": None,
             "portfolio_health": compute_portfolio_health_score(
                 holdings_count=0,
                 concentration_top1_pct=0.0,
@@ -315,6 +338,8 @@ def build_portfolio_analytics(
                 total_pnl_pct=0.0,
                 risk_flags=["no_holdings"],
                 diversification_score=0.0,
+                sector_count=0,
+                portfolio_beta=None,
             ),
             "sip_advice": compute_sip_advice(
                 holdings=[], total_invested=0.0, total_pnl_pct=0.0
@@ -390,6 +415,8 @@ def build_portfolio_analytics(
         total_pnl_pct=total_pnl_pct,
         risk_flags=risk_flags,
         diversification_score=diversification_score,
+        sector_count=sector_count,
+        portfolio_beta=portfolio_beta,
     )
 
     sip_advice = compute_sip_advice(
@@ -429,6 +456,7 @@ def build_portfolio_analytics(
         "concentration_top1_pct": round(concentration_top1_pct, 2),
         "concentration_top3_pct": round(concentration_top3_pct, 2),
         "diversification_score": diversification_score,
+        "portfolio_beta": round(portfolio_beta, 2) if portfolio_beta is not None else None,
         "holdings_ranked": holdings_ranked,
         "portfolio_health": portfolio_health,
         "sip_advice": sip_advice,

@@ -146,6 +146,18 @@ class MarketDataService:
             logger.warning("yfinance index snapshot fetch failed for %s: %s", ticker_symbol, exc)
             return None
 
+    def get_fundamentals_bulk(self, symbols: list[str]) -> dict[str, dict]:
+        """Fetch fundamentals (incl. beta/sector) for multiple symbols. Best-effort — a failure for one symbol never blocks the rest."""
+        results: dict[str, dict] = {}
+        for symbol in symbols:
+            data = self.fetch_fundamentals(symbol)
+            if data:
+                results[symbol] = data
+        return results
+
+    def get_india_vix(self) -> dict | None:
+        return self.fetch_index_snapshot("^INDIAVIX", "India VIX")
+
     def get_current_price(self, base_symbol: str) -> float | None:
         if not _HAS_YFINANCE:
             return None

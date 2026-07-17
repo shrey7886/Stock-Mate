@@ -143,6 +143,7 @@ class PortfolioSummaryResponse(BaseModel):
     total_pnl: float | None = None
     total_pnl_pct: float | None = None
     health_score: float | None = None
+    portfolio_beta: float | None = None
     holdings: list[dict] = []
     data_status: str | None = None
     action_required: str | None = None
@@ -165,6 +166,8 @@ class BenchmarkResponse(BaseModel):
     action_required: str | None = None
     link_endpoint: str | None = None
     points: list[BenchmarkPoint] = []
+    nifty_equivalent_value: float | None = None
+    nifty_equivalent_diff: float | None = None
 
 
 class SectorSlice(BaseModel):
@@ -225,6 +228,11 @@ class HoldingMover(BaseModel):
     current_value: float
 
 
+class VixSnapshot(BaseModel):
+    value: float
+    sentiment: str
+
+
 class MarketOverviewResponse(BaseModel):
     linked: bool
     data_status: str
@@ -232,6 +240,7 @@ class MarketOverviewResponse(BaseModel):
     indices: list[IndexSnapshot] = []
     top_gainers: list[HoldingMover] = []
     top_losers: list[HoldingMover] = []
+    vix: VixSnapshot | None = None
 
 
 class NewsArticle(BaseModel):

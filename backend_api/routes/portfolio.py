@@ -15,6 +15,7 @@ from backend_api.database.token_store import (
     upsert_news_cache,
     upsert_sector_cache,
 )
+from backend_api.models.schemas import VixSnapshot
 from backend_api.models.schemas import (
     BenchmarkPoint,
     BenchmarkResponse,
@@ -152,20 +153,74 @@ def _aggregate_holdings(holdings: list[dict]) -> dict:
     }
 
 
-def _compute_health_score(holdings: list[dict], aggregate: dict) -> float | None:
+def _sector_count_and_beta(holdings: list[dict]) -> tuple[int, float | None]:
+    """Best-effort sector count + value-weighted average beta from cached/fetched fundamentals. Never raises."""
+    try:
+        symbols = sorted({
+            (item.get("tradingsymbol") or item.get("symbol"))
+            for item in holdings
+            if (item.get("tradingsymbol") or item.get("symbol"))
+        })
+        if not symbols:
+            return 0, None
+
+        stale = get_stale_or_missing_sectors(symbols=symbols, max_age_days=7)
+        for symbol in stale:
+            sector = market_data_service.fetch_sector(symbol)
+            upsert_sector_cache(symbol=symbol, sector=sector)
+
+        sectors: set[str] = set()
+        for symbol in symbols:
+            cached = get_cached_sector(symbol=symbol)
+            sector = (cached.get("sector") if cached else None) or "Other"
+            sectors.add(sector)
+
+        beta_by_symbol: dict[str, float] = {}
+        for symbol in symbols:
+            if is_fundamentals_stale_or_missing(symbol=symbol):
+                data = market_data_service.fetch_fundamentals(symbol)
+                upsert_fundamentals_cache(symbol=symbol, data=data)
+            cached = get_cached_fundamentals(symbol=symbol)
+            data = cached.get("data") if cached else None
+            beta = data.get("beta") if data else None
+            if beta is not None:
+                beta_by_symbol[symbol] = float(beta)
+
+        weighted_sum = 0.0
+        weight_total = 0.0
+        for item in holdings:
+            symbol = item.get("tradingsymbol") or item.get("symbol")
+            if not symbol or symbol not in beta_by_symbol:
+                continue
+            quantity = _to_float(item.get("quantity"), default=0.0)
+            last_price = _to_float(item.get("last_price"), default=0.0)
+            value = quantity * last_price
+            weighted_sum += value * beta_by_symbol[symbol]
+            weight_total += value
+
+        portfolio_beta = (weighted_sum / weight_total) if weight_total > 0 else None
+        return len(sectors), portfolio_beta
+    except Exception:
+        return 0, None
+
+
+def _compute_health_score(holdings: list[dict], aggregate: dict) -> tuple[float | None, float | None]:
     try:
         from llm_orchestrator.utils.portfolio_analytics import build_portfolio_analytics
+        sector_count, portfolio_beta = _sector_count_and_beta(holdings)
         analytics = build_portfolio_analytics(
             holdings=holdings,
             total_invested=aggregate["total_invested"],
             total_current_value=aggregate["total_current_value"],
             total_pnl=aggregate["total_pnl"],
             total_pnl_pct=aggregate["total_pnl_pct"],
+            sector_count=sector_count,
+            portfolio_beta=portfolio_beta,
         )
         health = analytics.get("portfolio_health", {})
-        return health.get("score")
+        return health.get("score"), analytics.get("portfolio_beta")
     except Exception:
-        return None
+        return None, None
 
 
 @router.get("/summary")
@@ -177,7 +232,7 @@ def portfolio_summary(current_user: dict = Depends(get_current_user)) -> Portfol
         return PortfolioSummaryResponse(user_id=user_id, **short_circuit)
 
     aggregate = _aggregate_holdings(holdings)
-    health_score = _compute_health_score(holdings, aggregate)
+    health_score, portfolio_beta = _compute_health_score(holdings, aggregate)
     return PortfolioSummaryResponse(
         user_id=user_id,
         linked=True,
@@ -185,6 +240,7 @@ def portfolio_summary(current_user: dict = Depends(get_current_user)) -> Portfol
         message="Live portfolio summary.",
         holdings=holdings,
         health_score=health_score,
+        portfolio_beta=portfolio_beta,
         **aggregate,
     )
 
@@ -340,6 +396,16 @@ def portfolio_benchmark(
             for date in common_dates
         ]
 
+        aggregate = _aggregate_holdings(holdings)
+        total_invested = aggregate["total_invested"]
+        total_current_value = aggregate["total_current_value"]
+        nifty_equivalent_value = None
+        nifty_equivalent_diff = None
+        if base_nifty and total_invested > 0:
+            last_nifty = nifty_series[common_dates[-1]]
+            nifty_equivalent_value = round(total_invested * (last_nifty / base_nifty), 2)
+            nifty_equivalent_diff = round(nifty_equivalent_value - total_current_value, 2)
+
         return BenchmarkResponse(
             user_id=user_id,
             linked=True,
@@ -347,6 +413,8 @@ def portfolio_benchmark(
             data_status="live",
             message="Benchmark computed from current holdings against historical prices.",
             points=points,
+            nifty_equivalent_value=nifty_equivalent_value,
+            nifty_equivalent_diff=nifty_equivalent_diff,
         )
     except Exception as exc:
         return BenchmarkResponse(
@@ -510,6 +578,22 @@ def market_overview(current_user: dict = Depends(get_current_user)) -> MarketOve
             if snapshot:
                 indices.append(IndexSnapshot(**snapshot))
 
+        vix = None
+        vix_snapshot = market_data_service.get_india_vix()
+        if vix_snapshot:
+            vix_value = vix_snapshot["price"]
+            if vix_value < 13:
+                sentiment = "Extreme Greed"
+            elif vix_value < 16:
+                sentiment = "Greed"
+            elif vix_value < 20:
+                sentiment = "Neutral"
+            elif vix_value < 25:
+                sentiment = "Fear"
+            else:
+                sentiment = "Extreme Fear"
+            vix = VixSnapshot(value=vix_value, sentiment=sentiment)
+
         holdings, _short_circuit = _get_live_holdings(user_id)
         movers: list[HoldingMover] = []
         if holdings:
@@ -544,6 +628,7 @@ def market_overview(current_user: dict = Depends(get_current_user)) -> MarketOve
                 message="Market index data is temporarily unavailable.",
                 top_gainers=top_gainers,
                 top_losers=top_losers,
+                vix=vix,
             )
 
         return MarketOverviewResponse(
@@ -553,6 +638,7 @@ def market_overview(current_user: dict = Depends(get_current_user)) -> MarketOve
             indices=indices,
             top_gainers=top_gainers,
             top_losers=top_losers,
+            vix=vix,
         )
     except Exception as exc:
         return MarketOverviewResponse(
