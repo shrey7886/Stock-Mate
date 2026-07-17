@@ -1,6 +1,6 @@
 # Stock-Mate
 
-Stock-Mate is an AI-powered portfolio dashboard that connects to your Zerodha and/or Upstox brokerage accounts and gives you a live, consolidated view of your holdings, an AI chat assistant for portfolio questions, and market analytics — performance vs. NIFTY 50, sector allocation with concentration alerts, per-stock fundamentals, a market overview widget, a news digest, themed stock baskets, and more.
+Stock-Mate is an AI-powered portfolio dashboard that connects to your Zerodha and/or Upstox brokerage accounts and gives you a live, consolidated view of your holdings, an AI chat assistant for portfolio questions, and market analytics — performance vs. NIFTY 50, sector allocation with concentration alerts, per-stock fundamentals, a market overview widget, a news digest, themed stock baskets, price alerts, and more.
 
 ## How It Works
 
@@ -10,6 +10,7 @@ Stock-Mate is an AI-powered portfolio dashboard that connects to your Zerodha an
 4. **Stock financials** — click any holding to see its fundamentals (P/E, market cap, dividend yield, 52-week range, beta) alongside your own position in that stock
 5. **News & baskets** — a News page shows the latest headlines for your top holdings, and a Baskets page groups stocks into curated themes (EV, Banking, IT Services, and more), highlighting which ones you already hold
 6. **AI chat** — an LLM-backed assistant (Groq or OpenAI) answers portfolio questions with buy/hold/trim guidance and proactive insights
+7. **Price alerts** — set a target price and direction (above/below) for any stock from its fundamentals panel; a background job checks prices every 15 minutes and notifies you via a bell icon in the nav bar and a dedicated "My Alerts" page
 
 ## Architecture
 
@@ -32,6 +33,7 @@ Data is stored in a local SQLite database (`backend_api/database/backend.db`, cr
 - **Themed stock baskets** — curated stock groupings by theme (EV, Banking, IT Services, Pharma, FMCG, and more), with your own holdings highlighted
 - **AI chat assistant** — natural-language portfolio Q&A with action tags (Hold/Trim/Add/Watch/Rebalance) and proactive insights
 - **Zerodha & Upstox account linking** — OAuth-based linking/unlinking for both brokers, multiple accounts per broker, primary account selection, holdings from every connected broker merged into one portfolio and badged by source
+- **Price alerts** — per-stock target-price alerts with an above/below direction, one active alert per stock+direction (creating a new one replaces the old), checked automatically every 15 minutes against live prices, with a nav-bar bell notification (unread count badge, dismiss/reset actions) and a "My Alerts" management page
 
 ## Prerequisites
 
@@ -116,15 +118,22 @@ The dashboard is served at `http://localhost:5174` and proxies API calls to the 
 - Themed stock baskets are curated, static reference data seeded into SQLite on first run — they are not fetched from an external API and do not go stale.
 - If Yahoo Finance is temporarily unreachable, the affected endpoints degrade gracefully (empty chart/panel/`data_status: market_data_unavailable`) instead of failing the whole dashboard.
 
+## Price alerts notes
+
+- Set an alert from any stock's fundamentals panel (target price + Above/Below direction). Only one active alert per stock+direction per user is kept — creating another one for the same stock/direction replaces it.
+- A background job (`APScheduler`, started with the FastAPI app) checks all active alerts against live prices from `yfinance` every 15 minutes. Prices are fetched once per distinct symbol per run, even if multiple alerts share a ticker.
+- Triggered alerts show up as a badge count on the bell icon in the sidebar, with a dropdown to dismiss or reset them; the "My Alerts" page (`/alerts`) lists and lets you delete all of your alerts, active or triggered.
+- If a price fetch fails for a symbol, that symbol is skipped for the run and the rest of the batch still runs — a fetch failure never crashes the scheduled job.
+
 ## Project Structure
 ```
 Stock-Mate/
-├── backend_api/         # FastAPI backend (auth, portfolio, Zerodha, chat, market data)
-│   ├── routes/          # API route modules
-│   ├── services/        # Zerodha, broker token, and market data services
+├── backend_api/         # FastAPI backend (auth, portfolio, Zerodha, Upstox, alerts, chat, market data)
+│   ├── routes/          # API route modules (incl. alerts.py)
+│   ├── services/        # Zerodha, Upstox, broker token, market data, and alert-checking services
 │   ├── database/        # SQLite access layer
 │   └── models/          # Pydantic request/response schemas
 ├── llm_orchestrator/    # LLM chat/recommendation logic
-├── frontend/            # React + Vite dashboard
+├── frontend/            # React + Vite dashboard (incl. AlertsPage, alert bell in nav)
 └── tests/               # Test suite
 ```
