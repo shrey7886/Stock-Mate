@@ -22,6 +22,12 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
 } from "recharts";
 
 const COLORS = ["#10B981", "#06B6D4", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#6366F1", "#14B8A6"];
@@ -196,6 +202,81 @@ function _to_float(v) {
   return isNaN(n) ? 0 : n;
 }
 
+const BENCHMARK_PERIODS = ["1M", "3M", "6M", "1Y"];
+
+function BenchmarkChart({ data, loading, period, onPeriodChange, dataStatus }) {
+  return (
+    <motion.div variants={itemVariants} className="glass-card p-8 md:p-10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div>
+          <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Portfolio vs NIFTY 50</h2>
+          <p className="text-[11px] text-[var(--color-text-muted)] mt-2">Indexed to 100 at period start · based on current holdings</p>
+        </div>
+        <div className="flex items-center p-1 rounded-full bg-[var(--color-surface-overlay)] border border-[var(--color-border)] w-fit">
+          {BENCHMARK_PERIODS.map((p) => (
+            <button
+              key={p}
+              onClick={() => onPeriodChange(p)}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${period === p ? "bg-[var(--color-brand)] text-white" : "text-[var(--color-text-secondary)]"}`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <Shimmer className="h-72" />
+      ) : data.length > 0 ? (
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+              <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--color-text-muted)" }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--color-text-muted)" }} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "12px",
+                  fontSize: "13px",
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: "12px" }} />
+              <Line type="monotone" dataKey="portfolio_index" name="Your Portfolio" stroke="var(--color-brand)" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="nifty_index" name="NIFTY 50" stroke="#94A3B8" strokeWidth={2} dot={false} strokeDasharray="4 4" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="h-72 flex items-center justify-center text-center">
+          <p className="text-sm text-[var(--color-text-muted)] max-w-sm">
+            {dataStatus === "market_data_unavailable"
+              ? "Market data is temporarily unavailable. Try again shortly."
+              : "No benchmark data available yet."}
+          </p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function ConcentrationBanner({ sector, pct }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      className="flex items-center gap-4 px-6 py-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 shadow-sm"
+    >
+      <AlertCircle size={20} className="text-amber-500 shrink-0" />
+      <p className="text-[15px] text-amber-600 dark:text-amber-400 font-medium">
+        You have {pct}% exposure to {sector} — consider diversifying.
+      </p>
+    </motion.div>
+  );
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [portfolioData, setPortfolioData] = useState(null);
@@ -204,6 +285,14 @@ export default function DashboardPage() {
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [demoMode, setDemoMode] = useState(() => localStorage.getItem("sm_demo_mode") === "1");
+
+  const [benchmarkPeriod, setBenchmarkPeriod] = useState("1M");
+  const [benchmarkData, setBenchmarkData] = useState([]);
+  const [benchmarkStatus, setBenchmarkStatus] = useState(null);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(true);
+
+  const [sectorData, setSectorData] = useState(null);
+  const [sectorLoading, setSectorLoading] = useState(true);
 
   const fetchData = async () => {
     setLoading(true);
@@ -230,10 +319,43 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchBenchmark = async (period) => {
+    setBenchmarkLoading(true);
+    try {
+      const data = await portfolio.benchmark(period);
+      setBenchmarkData(data.points || []);
+      setBenchmarkStatus(data.data_status);
+    } catch {
+      setBenchmarkData([]);
+      setBenchmarkStatus("market_data_unavailable");
+    } finally {
+      setBenchmarkLoading(false);
+    }
+  };
+
+  const fetchSectorAllocation = async () => {
+    setSectorLoading(true);
+    try {
+      const data = await portfolio.sectorAllocation();
+      setSectorData(data);
+    } catch {
+      setSectorData(null);
+    } finally {
+      setSectorLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchInsights();
+    fetchBenchmark(benchmarkPeriod);
+    fetchSectorAllocation();
   }, []);
+
+  const handleBenchmarkPeriodChange = (period) => {
+    setBenchmarkPeriod(period);
+    fetchBenchmark(period);
+  };
 
   const formatCurrency = (val) => {
     if (val == null) return "—";
@@ -304,15 +426,16 @@ export default function DashboardPage() {
     navigate("/chat", { state: { prefill: prompt } });
   };
 
-  const sectorMap = {};
-  holdings.forEach((h) => {
-    const key = h.exchange || h.sector || "Other";
-    const val = _to_float(h.last_price) * _to_float(h.quantity);
-    sectorMap[key] = (sectorMap[key] || 0) + val;
-  });
-  const pieData = Object.entries(sectorMap)
-    .filter(([, v]) => v > 0)
-    .map(([name, value]) => ({ name, value }));
+  const demoSectorSlices = [
+    { sector: "Information Technology", value: 218800, pct: 51.06 },
+    { sector: "Financial Services", value: 85696, pct: 20.0 },
+    { sector: "Energy", value: 65916, pct: 15.38 },
+    { sector: "Other", value: 58238, pct: 13.56 },
+  ];
+  const effectiveSectorData = (!isLinked && demoMode)
+    ? { slices: demoSectorSlices, over_concentrated: true, over_concentrated_sector: "Information Technology", over_concentrated_pct: 51.06 }
+    : sectorData;
+  const pieData = (effectiveSectorData?.slices || []).map((s) => ({ name: s.sector, value: s.value }));
 
   return (
     <div className="p-6 md:p-12 max-w-[1400px] mx-auto space-y-10 min-h-full">
@@ -362,6 +485,12 @@ export default function DashboardPage() {
             </div>
             <Link to="/broker" className="shrink-0 text-[13px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 hover:text-amber-700 underline">Reconnect</Link>
           </motion.div>
+        )}
+        {!loading && effectiveSectorData?.over_concentrated && (
+          <ConcentrationBanner
+            sector={effectiveSectorData.over_concentrated_sector}
+            pct={effectiveSectorData.over_concentrated_pct}
+          />
         )}
       </AnimatePresence>
 
@@ -442,6 +571,14 @@ export default function DashboardPage() {
               )}
             </motion.div>
           </div>
+
+          <BenchmarkChart
+            data={benchmarkData}
+            loading={benchmarkLoading}
+            period={benchmarkPeriod}
+            onPeriodChange={handleBenchmarkPeriodChange}
+            dataStatus={benchmarkStatus}
+          />
 
           {/* Holdings Table */}
           {holdings.length > 0 && (

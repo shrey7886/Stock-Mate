@@ -134,3 +134,39 @@ class PortfolioSummaryResponse(BaseModel):
     action_required: str | None = None
     link_endpoint: str | None = None
     message: str
+
+
+class BenchmarkPoint(BaseModel):
+    date: str
+    portfolio_index: float
+    nifty_index: float
+
+
+class BenchmarkResponse(BaseModel):
+    user_id: str
+    linked: bool
+    period: str
+    data_status: str
+    message: str
+    action_required: str | None = None
+    link_endpoint: str | None = None
+    points: list[BenchmarkPoint] = []
+
+
+class SectorSlice(BaseModel):
+    sector: str
+    value: float
+    pct: float
+
+
+class SectorAllocationResponse(BaseModel):
+    user_id: str
+    linked: bool
+    data_status: str
+    message: str
+    action_required: str | None = None
+    link_endpoint: str | None = None
+    slices: list[SectorSlice] = []
+    over_concentrated: bool = False
+    over_concentrated_sector: str | None = None
+    over_concentrated_pct: float | None = None

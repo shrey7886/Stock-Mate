@@ -89,6 +89,16 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sector_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL UNIQUE,
+                sector TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
         # Backward-compatible migration: old schema had `state` instead of `state_hash`
         cols = [r[1] for r in conn.execute("PRAGMA table_info(oauth_states)").fetchall()]
@@ -588,3 +598,48 @@ def get_user_by_id(user_id: str) -> dict | None:
     if not row:
         return None
     return {"user_id": row[0], "email": row[1], "password_hash": row[2], "display_name": row[3]}
+
+
+# ── Sector cache ─────────────────────────────────────────────────────────────
+
+def get_cached_sector(*, symbol: str) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT symbol, sector, updated_at FROM sector_cache WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+    if not row:
+        return None
+    return {"symbol": row[0], "sector": row[1], "updated_at": row[2]}
+
+
+def upsert_sector_cache(*, symbol: str, sector: str | None) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO sector_cache (symbol, sector)
+            VALUES (?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                sector=excluded.sector,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (symbol, sector),
+        )
+        conn.commit()
+
+
+def get_stale_or_missing_sectors(*, symbols: list[str], max_age_days: int = 7) -> list[str]:
+    if not symbols:
+        return []
+    with sqlite3.connect(DB_PATH) as conn:
+        placeholders = ",".join("?" for _ in symbols)
+        rows = conn.execute(
+            f"""
+            SELECT symbol FROM sector_cache
+            WHERE symbol IN ({placeholders})
+              AND updated_at >= datetime('now', ?)
+            """,
+            (*symbols, f"-{max_age_days} days"),
+        ).fetchall()
+    fresh = {row[0] for row in rows}
+    return [s for s in symbols if s not in fresh]
