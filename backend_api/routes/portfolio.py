@@ -4,11 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend_api.core.security import get_current_user
 from backend_api.database.token_store import (
+    get_all_baskets,
     get_cached_fundamentals,
+    get_cached_news,
     get_cached_sector,
     get_stale_or_missing_sectors,
     is_fundamentals_stale_or_missing,
+    is_news_stale_or_missing,
     upsert_fundamentals_cache,
+    upsert_news_cache,
     upsert_sector_cache,
 )
 from backend_api.models.schemas import (
@@ -17,11 +21,16 @@ from backend_api.models.schemas import (
     HoldingMover,
     IndexSnapshot,
     MarketOverviewResponse,
+    NewsArticle,
+    NewsDigestResponse,
     PortfolioSummaryResponse,
     SectorAllocationResponse,
     SectorSlice,
     StockFinancialsResponse,
     StockFundamentals,
+    SymbolNews,
+    ThemedBasket,
+    ThemedBasketsResponse,
 )
 from backend_api.services.broker_token_service import broker_token_service
 from backend_api.services.market_data_service import market_data_service
@@ -31,6 +40,7 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 VALID_PERIODS = {"1M", "3M", "6M", "1Y"}
 SECTOR_CONCENTRATION_THRESHOLD_PCT = 40.0
+DEFAULT_NEWS_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
 def _get_live_holdings(user_id: str) -> tuple[list[dict] | None, dict]:
@@ -560,4 +570,105 @@ def market_overview(current_user: dict = Depends(get_current_user)) -> MarketOve
             linked=False,
             data_status="market_data_unavailable",
             message=f"Market overview is temporarily unavailable: {exc}",
+        )
+
+
+@router.get("/news")
+def news_digest(current_user: dict = Depends(get_current_user)) -> NewsDigestResponse:
+    user_id = str(current_user.get("sub"))
+
+    try:
+        holdings, _short_circuit = _get_live_holdings(user_id)
+
+        if holdings:
+            ranked = sorted(
+                holdings,
+                key=lambda item: _to_float(item.get("quantity"), default=0.0)
+                * _to_float(item.get("last_price"), default=0.0),
+                reverse=True,
+            )
+            symbols = []
+            for item in ranked:
+                symbol = (item.get("tradingsymbol") or item.get("symbol") or "").upper()
+                if symbol and symbol not in symbols:
+                    symbols.append(symbol)
+                if len(symbols) >= 8:
+                    break
+        else:
+            symbols = DEFAULT_NEWS_SYMBOLS
+
+        items: list[SymbolNews] = []
+        for symbol in symbols:
+            if is_news_stale_or_missing(symbol=symbol):
+                data = market_data_service.fetch_news(symbol)
+                upsert_news_cache(symbol=symbol, data=data)
+
+            cached = get_cached_news(symbol=symbol)
+            articles = cached.get("data") if cached else None
+            if not articles:
+                continue
+
+            items.append(
+                SymbolNews(
+                    symbol=symbol,
+                    articles=[NewsArticle(**article) for article in articles],
+                )
+            )
+
+        if not items:
+            return NewsDigestResponse(
+                linked=holdings is not None,
+                data_status="market_data_unavailable",
+                message="News headlines are temporarily unavailable.",
+            )
+
+        return NewsDigestResponse(
+            linked=holdings is not None,
+            data_status="live",
+            message="News digest loaded.",
+            items=items,
+        )
+    except Exception as exc:
+        return NewsDigestResponse(
+            linked=False,
+            data_status="market_data_unavailable",
+            message=f"News digest is temporarily unavailable: {exc}",
+        )
+
+
+@router.get("/baskets")
+def themed_baskets(current_user: dict = Depends(get_current_user)) -> ThemedBasketsResponse:
+    user_id = str(current_user.get("sub"))
+
+    try:
+        holdings, _short_circuit = _get_live_holdings(user_id)
+
+        held_symbols: set[str] = set()
+        if holdings:
+            for item in holdings:
+                symbol = (item.get("tradingsymbol") or item.get("symbol") or "").upper()
+                if symbol:
+                    held_symbols.add(symbol)
+
+        baskets = [
+            ThemedBasket(
+                theme=basket["theme"],
+                description=basket["description"],
+                symbols=basket["symbols"],
+                held_symbols=[s for s in basket["symbols"] if s.upper() in held_symbols],
+            )
+            for basket in get_all_baskets()
+        ]
+
+        return ThemedBasketsResponse(
+            linked=holdings is not None,
+            data_status="live",
+            message="Themed baskets loaded.",
+            baskets=baskets,
+        )
+    except Exception as exc:
+        return ThemedBasketsResponse(
+            linked=False,
+            data_status="unavailable",
+            message=f"Themed baskets are temporarily unavailable: {exc}",
         )

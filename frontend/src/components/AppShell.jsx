@@ -10,7 +10,9 @@ import {
   X,
   Sparkles,
   Moon,
-  Sun
+  Sun,
+  Newspaper,
+  LayoutGrid
 } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,6 +21,8 @@ import FoleoLogo from "./FoleoLogo";
 const NAV_ITEMS = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Portfolio" },
   { to: "/chat", icon: MessageCircle, label: "Assistant" },
+  { to: "/news", icon: Newspaper, label: "News" },
+  { to: "/baskets", icon: LayoutGrid, label: "Baskets" },
   { to: "/broker", icon: Link2, label: "Broker" },
 ];
 

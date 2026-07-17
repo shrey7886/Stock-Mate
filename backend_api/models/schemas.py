@@ -218,3 +218,36 @@ class MarketOverviewResponse(BaseModel):
     indices: list[IndexSnapshot] = []
     top_gainers: list[HoldingMover] = []
     top_losers: list[HoldingMover] = []
+
+
+class NewsArticle(BaseModel):
+    title: str
+    publisher: str | None = None
+    link: str | None = None
+    published_at: str | None = None
+
+
+class SymbolNews(BaseModel):
+    symbol: str
+    articles: list[NewsArticle] = []
+
+
+class NewsDigestResponse(BaseModel):
+    linked: bool
+    data_status: str
+    message: str
+    items: list[SymbolNews] = []
+
+
+class ThemedBasket(BaseModel):
+    theme: str
+    description: str | None = None
+    symbols: list[str] = []
+    held_symbols: list[str] = []
+
+
+class ThemedBasketsResponse(BaseModel):
+    linked: bool
+    data_status: str
+    message: str
+    baskets: list[ThemedBasket] = []
