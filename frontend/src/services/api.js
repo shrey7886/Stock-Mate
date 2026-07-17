@@ -52,6 +52,8 @@ export const portfolio = {
   summary: () => request("/portfolio/summary"),
   verifyBroker: (accountId) =>
     request(`/portfolio/verify-broker${accountId ? `?account_id=${accountId}` : ""}`),
+  benchmark: (period = "1M") => request(`/portfolio/benchmark?period=${period}`),
+  sectorAllocation: () => request("/portfolio/sector-allocation"),
 };
 
 /* ── Chat ─────────────────────────────────────────── */
