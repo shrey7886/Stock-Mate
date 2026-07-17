@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -17,8 +17,11 @@ import {
   X,
   BarChart3,
   BellPlus,
+  Share2,
 } from "lucide-react";
+import html2canvas from "html2canvas";
 import { portfolio, chat, alerts } from "../services/api";
+import ReportCard from "../components/ReportCard";
 import {
   PieChart,
   Pie,
@@ -34,6 +37,13 @@ import {
 } from "recharts";
 
 const COLORS = ["#10B981", "#06B6D4", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#6366F1", "#14B8A6"];
+
+function formatCurrencyINR(val) {
+  if (val == null) return "—";
+  const n = Number(val);
+  if (isNaN(n)) return "—";
+  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
 
 const ease = [0.25, 0.1, 0.25, 1];
 
@@ -93,6 +103,21 @@ function HealthGauge({ score }) {
         <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[3px] font-bold mt-1">Health</span>
       </div>
     </div>
+  );
+}
+
+function BetaBadge({ beta }) {
+  if (beta == null) return null;
+  const label = beta < 0.8 ? "Conservative" : beta <= 1.2 ? "Market-aligned" : "Aggressive";
+  const color = beta < 0.8 ? "var(--color-text-secondary)" : beta <= 1.2 ? "var(--color-brand)" : "#F59E0B";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-[1.5px]"
+      style={{ color, backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)` }}
+      title={`Weighted portfolio beta: ${beta.toFixed(2)}`}
+    >
+      β {beta.toFixed(2)} · {label}
+    </span>
   );
 }
 
@@ -207,7 +232,23 @@ function _to_float(v) {
 
 const BENCHMARK_PERIODS = ["1M", "3M", "6M", "1Y"];
 
-function BenchmarkChart({ data, loading, period, onPeriodChange, dataStatus }) {
+function NiftyWhatIfCallout({ totalInvested, niftyEquivalent, niftyDiff }) {
+  if (niftyEquivalent == null || niftyDiff == null || !totalInvested) return null;
+  const better = niftyDiff > 0;
+  return (
+    <div className="mt-6 px-5 py-4 rounded-2xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)] border-l-4 border-l-[var(--color-brand)]">
+      <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+        If you had invested <span className="font-semibold text-[var(--color-text-primary)]">{formatCurrencyINR(totalInvested)}</span> in NIFTY 50 over this period instead, you'd have{" "}
+        <span className="font-semibold text-[var(--color-text-primary)]">{formatCurrencyINR(niftyEquivalent)}</span> today — that's{" "}
+        <span className={`font-semibold ${better ? "text-[var(--color-profit)]" : "text-[var(--color-loss)]"}`}>
+          {formatCurrencyINR(Math.abs(niftyDiff))} {better ? "more" : "less"}
+        </span>{" "}than your current portfolio.
+      </p>
+    </div>
+  );
+}
+
+function BenchmarkChart({ data, loading, period, onPeriodChange, dataStatus, totalInvested, niftyEquivalent, niftyDiff }) {
   return (
     <motion.div variants={itemVariants} className="glass-card p-8 md:p-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
@@ -260,6 +301,7 @@ function BenchmarkChart({ data, loading, period, onPeriodChange, dataStatus }) {
           </p>
         </div>
       )}
+      <NiftyWhatIfCallout totalInvested={totalInvested} niftyEquivalent={niftyEquivalent} niftyDiff={niftyDiff} />
     </motion.div>
   );
 }
@@ -308,19 +350,62 @@ function MoverRow({ mover }) {
   );
 }
 
+function VixGauge({ vix }) {
+  if (!vix) return null;
+  const clamped = Math.max(0, Math.min(40, vix.value));
+  const pct = (clamped / 40) * 100;
+  const color =
+    vix.sentiment === "Extreme Greed" || vix.sentiment === "Greed"
+      ? "var(--color-brand)"
+      : vix.sentiment === "Neutral"
+      ? "#F59E0B"
+      : "var(--color-loss)";
+  const circumference = 2 * Math.PI * 32;
+  const offset = circumference - (pct / 100) * circumference;
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-2.5 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)]">
+      <div className="relative w-16 h-16 shrink-0">
+        <svg viewBox="0 0 76 76" className="w-full h-full -rotate-90">
+          <circle cx="38" cy="38" r="32" fill="none" stroke="var(--color-border)" strokeWidth="6" />
+          <motion.circle
+            cx="38" cy="38" r="32" fill="none"
+            stroke={color} strokeWidth="6" strokeLinecap="round"
+            strokeDasharray={circumference}
+            initial={{ strokeDashoffset: circumference }}
+            animate={{ strokeDashoffset: offset }}
+            transition={{ duration: 1.2, ease: [0.25, 0.1, 0.25, 1] }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-sm font-display font-semibold text-[var(--color-text-primary)]">{vix.value.toFixed(1)}</span>
+        </div>
+      </div>
+      <div>
+        <p className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-[2px]">India VIX</p>
+        <p className="text-sm font-semibold mt-0.5" style={{ color }}>{vix.sentiment}</p>
+      </div>
+    </div>
+  );
+}
+
 function MarketOverviewWidget({ data, loading }) {
   const indices = data?.indices || [];
   const gainers = data?.top_gainers || [];
   const losers = data?.top_losers || [];
   const dataStatus = data?.data_status;
+  const vix = data?.vix;
 
   return (
     <motion.div variants={itemVariants} className="glass-card p-8 md:p-10">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 rounded-xl bg-[var(--color-brand)]/10">
-          <BarChart3 size={16} className="text-[var(--color-brand)]" />
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-[var(--color-brand)]/10">
+            <BarChart3 size={16} className="text-[var(--color-brand)]" />
+          </div>
+          <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Market Overview</h2>
         </div>
-        <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Market Overview</h2>
+        <VixGauge vix={vix} />
       </div>
 
       {loading ? (
@@ -570,6 +655,8 @@ export default function DashboardPage() {
   const [benchmarkData, setBenchmarkData] = useState([]);
   const [benchmarkStatus, setBenchmarkStatus] = useState(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(true);
+  const [niftyEquivalent, setNiftyEquivalent] = useState(null);
+  const [niftyDiff, setNiftyDiff] = useState(null);
 
   const [sectorData, setSectorData] = useState(null);
   const [sectorLoading, setSectorLoading] = useState(true);
@@ -612,9 +699,13 @@ export default function DashboardPage() {
       const data = await portfolio.benchmark(period);
       setBenchmarkData(data.points || []);
       setBenchmarkStatus(data.data_status);
+      setNiftyEquivalent(data.nifty_equivalent_value ?? null);
+      setNiftyDiff(data.nifty_equivalent_diff ?? null);
     } catch {
       setBenchmarkData([]);
       setBenchmarkStatus("market_data_unavailable");
+      setNiftyEquivalent(null);
+      setNiftyDiff(null);
     } finally {
       setBenchmarkLoading(false);
     }
@@ -723,6 +814,39 @@ export default function DashboardPage() {
   const holdings = effectivePortfolioData?.holdings || [];
   const healthScore = effectivePortfolioData?.health_score;
 
+  const topPerformer = holdings.reduce((best, h) => {
+    const qty = _to_float(h.quantity);
+    const avgPrice = _to_float(h.average_price);
+    const ltp = _to_float(h.last_price);
+    const invested = qty * avgPrice;
+    if (invested <= 0) return best;
+    const hPnlPct = ((qty * ltp - invested) / invested) * 100;
+    const symbol = h.tradingsymbol || h.symbol;
+    if (!symbol) return best;
+    if (!best || hPnlPct > best.pnlPct) return { symbol, pnlPct: hPnlPct };
+    return best;
+  }, null);
+
+  const reportCardRef = useRef(null);
+  const [sharingReport, setSharingReport] = useState(false);
+
+  const handleShareReport = async () => {
+    if (!reportCardRef.current) return;
+    setSharingReport(true);
+    try {
+      const canvas = await html2canvas(reportCardRef.current, { backgroundColor: null, scale: 2 });
+      const dataUrl = canvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = "stock-mate-portfolio-report.png";
+      link.click();
+    } catch {
+      // best-effort client-side export; silently ignore failures
+    } finally {
+      setSharingReport(false);
+    }
+  };
+
   const checklistItems = [
     { label: "Connect broker", to: "/broker", done: isLinked },
     { label: "Ask your first AI question", to: "/chat", done: localStorage.getItem("sm_onboarding_first_chat") === "1" },
@@ -792,13 +916,37 @@ export default function DashboardPage() {
               : "Connect a broker to see live data"}
           </p>
         </div>
-        <button
-          onClick={() => { fetchData(); fetchInsights(); }}
-          className="p-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-subtle)] transition-all duration-300 shadow-sm"
-          title="Refresh Dashboard"
-        >
-          <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-        </button>
+        <div className="flex items-center gap-3">
+          {effectiveIsLinked && (
+            <button
+              onClick={handleShareReport}
+              disabled={sharingReport}
+              className="flex items-center gap-2 px-4 py-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-subtle)] transition-all duration-300 shadow-sm disabled:opacity-50"
+              title="Share portfolio report"
+            >
+              <Share2 size={16} className={sharingReport ? "animate-pulse" : ""} />
+              <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">Share</span>
+            </button>
+          )}
+          <button
+            onClick={() => { fetchData(); fetchInsights(); }}
+            className="p-3 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-subtle)] transition-all duration-300 shadow-sm"
+            title="Refresh Dashboard"
+          >
+            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ position: "fixed", top: -9999, left: -9999, pointerEvents: "none" }}>
+        <ReportCard
+          ref={reportCardRef}
+          healthScore={healthScore}
+          pnlPct={pnlPct}
+          topPerformer={topPerformer}
+          sectorSlices={effectiveSectorData?.slices || []}
+          generatedAt={new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+        />
       </div>
 
       {/* Errors / Warnings */}
@@ -860,7 +1008,10 @@ export default function DashboardPage() {
             {/* Health */}
             <motion.div variants={itemVariants} className="glass-card p-10 lg:col-span-2 flex flex-col items-center text-center justify-center relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-[var(--color-brand)]/5 rounded-full blur-[80px] -mr-32 -mt-32 pointer-events-none" />
-              <h2 className="text-xs font-bold text-[var(--color-text-muted)] mb-8 uppercase tracking-[3px] self-start w-full text-left">Portfolio Health</h2>
+              <div className="flex items-center justify-between w-full mb-8">
+                <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Portfolio Health</h2>
+                <BetaBadge beta={effectivePortfolioData?.portfolio_beta} />
+              </div>
               {healthScore != null ? (
                 <>
                   <HealthGauge score={healthScore} />
@@ -912,6 +1063,9 @@ export default function DashboardPage() {
             period={benchmarkPeriod}
             onPeriodChange={handleBenchmarkPeriodChange}
             dataStatus={benchmarkStatus}
+            totalInvested={portfolioData?.total_invested}
+            niftyEquivalent={niftyEquivalent}
+            niftyDiff={niftyDiff}
           />
 
           {/* Holdings Table */}
