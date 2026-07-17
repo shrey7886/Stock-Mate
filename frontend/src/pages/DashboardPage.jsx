@@ -14,6 +14,8 @@ import {
   Link2,
   CheckSquare,
   Square,
+  X,
+  BarChart3,
 } from "lucide-react";
 import { portfolio, chat } from "../services/api";
 import {
@@ -277,6 +279,208 @@ function ConcentrationBanner({ sector, pct }) {
   );
 }
 
+function IndexStat({ index }) {
+  const isPositive = index.change_pct >= 0;
+  return (
+    <div className="flex-1 p-5 rounded-2xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)]">
+      <p className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-[2px]">{index.label}</p>
+      <p className="text-2xl font-display font-semibold text-[var(--color-text-primary)] mt-2 tracking-tight">
+        {index.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+      </p>
+      <span className={`inline-flex items-center gap-1 mt-2 text-xs font-bold ${isPositive ? "text-[var(--color-profit)]" : "text-[var(--color-loss)]"}`}>
+        {isPositive ? <TrendingUp size={12} strokeWidth={2.5} /> : <TrendingDown size={12} strokeWidth={2.5} />}
+        {isPositive ? "+" : ""}{index.change_pct.toFixed(2)}%
+      </span>
+    </div>
+  );
+}
+
+function MoverRow({ mover }) {
+  const isPositive = mover.change_pct >= 0;
+  return (
+    <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)]">
+      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{mover.symbol}</span>
+      <span className={`text-[13px] font-bold ${isPositive ? "text-[var(--color-profit)]" : "text-[var(--color-loss)]"}`}>
+        {isPositive ? "+" : ""}{mover.change_pct.toFixed(2)}%
+      </span>
+    </div>
+  );
+}
+
+function MarketOverviewWidget({ data, loading }) {
+  const indices = data?.indices || [];
+  const gainers = data?.top_gainers || [];
+  const losers = data?.top_losers || [];
+  const dataStatus = data?.data_status;
+
+  return (
+    <motion.div variants={itemVariants} className="glass-card p-8 md:p-10">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 rounded-xl bg-[var(--color-brand)]/10">
+          <BarChart3 size={16} className="text-[var(--color-brand)]" />
+        </div>
+        <h2 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-[3px]">Market Overview</h2>
+      </div>
+
+      {loading ? (
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Shimmer className="h-24" />
+          <Shimmer className="h-24" />
+        </div>
+      ) : indices.length > 0 ? (
+        <div className="grid lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-2 flex flex-col sm:flex-row gap-4">
+            {indices.map((idx) => <IndexStat key={idx.symbol} index={idx} />)}
+          </div>
+          <div>
+            <p className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-[2px] mb-3">Top Gainers</p>
+            <div className="space-y-2">
+              {gainers.length > 0 ? gainers.map((m) => <MoverRow key={m.symbol} mover={m} />) : (
+                <p className="text-xs text-[var(--color-text-muted)] py-2">No gainers to show</p>
+              )}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-[2px] mb-3">Top Losers</p>
+            <div className="space-y-2">
+              {losers.length > 0 ? losers.map((m) => <MoverRow key={m.symbol} mover={m} />) : (
+                <p className="text-xs text-[var(--color-text-muted)] py-2">No losers to show</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-[var(--color-text-muted)] py-6 text-center">
+          {dataStatus === "market_data_unavailable" ? "Market data is temporarily unavailable." : "No market data available yet."}
+        </p>
+      )}
+    </motion.div>
+  );
+}
+
+function StockFinancialsPanel({ symbol, data, loading, onClose }) {
+  const f = data?.fundamentals;
+  const holding = data?.holding;
+  const dataStatus = data?.data_status;
+
+  const formatCurrency = (val) => {
+    if (val == null) return "—";
+    const n = Number(val);
+    if (isNaN(n)) return "—";
+    return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  };
+
+  const formatLarge = (val) => {
+    if (val == null) return "—";
+    const n = Number(val);
+    if (isNaN(n)) return "—";
+    if (n >= 1e12) return `₹${(n / 1e12).toFixed(2)}T`;
+    if (n >= 1e9) return `₹${(n / 1e9).toFixed(2)}B`;
+    if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)}Cr`;
+    return formatCurrency(n);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.98 }}
+        transition={{ duration: 0.3, ease }}
+        onClick={(e) => e.stopPropagation()}
+        className="glass-card w-full max-w-lg max-h-[85vh] overflow-y-auto p-8 md:p-10 relative"
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-6 right-6 p-2 rounded-full bg-[var(--color-surface-overlay)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+        >
+          <X size={16} />
+        </button>
+
+        <h2 className="text-2xl font-display font-semibold text-[var(--color-text-primary)]">{symbol}</h2>
+
+        {loading ? (
+          <div className="space-y-3 mt-6">
+            {[...Array(4)].map((_, i) => <Shimmer key={i} className="h-12" />)}
+          </div>
+        ) : f ? (
+          <div className="mt-6 space-y-6">
+            {f.long_name && <p className="text-sm text-[var(--color-text-secondary)]">{f.long_name}</p>}
+
+            {holding && (
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-2xl bg-[var(--color-brand)]/5 border border-[var(--color-brand)]/15">
+                <div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Qty</p>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{holding.quantity}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Avg Price</p>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatCurrency(holding.average_price)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">LTP</p>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatCurrency(holding.last_price)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">P&L</p>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatCurrency(holding.pnl)}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Sector</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{f.sector || "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Market Cap</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{formatLarge(f.market_cap)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">P/E (Trailing)</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{f.pe_ratio != null ? f.pe_ratio.toFixed(2) : "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">P/E (Forward)</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{f.forward_pe != null ? f.forward_pe.toFixed(2) : "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Dividend Yield</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{f.dividend_yield != null ? `${(f.dividend_yield * 100).toFixed(2)}%` : "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">Beta</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{f.beta != null ? f.beta.toFixed(2) : "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">52W High</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{formatCurrency(f.fifty_two_week_high)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">52W Low</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)] mt-1">{formatCurrency(f.fifty_two_week_low)}</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--color-text-muted)] mt-8 text-center py-8">
+            {dataStatus === "market_data_unavailable"
+              ? "Fundamentals are temporarily unavailable for this stock."
+              : "No fundamentals data available."}
+          </p>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [portfolioData, setPortfolioData] = useState(null);
@@ -293,6 +497,13 @@ export default function DashboardPage() {
 
   const [sectorData, setSectorData] = useState(null);
   const [sectorLoading, setSectorLoading] = useState(true);
+
+  const [marketOverview, setMarketOverview] = useState(null);
+  const [marketOverviewLoading, setMarketOverviewLoading] = useState(true);
+
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [stockFinancials, setStockFinancials] = useState(null);
+  const [stockFinancialsLoading, setStockFinancialsLoading] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -345,16 +556,47 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchMarketOverview = async () => {
+    setMarketOverviewLoading(true);
+    try {
+      const data = await portfolio.marketOverview();
+      setMarketOverview(data);
+    } catch {
+      setMarketOverview(null);
+    } finally {
+      setMarketOverviewLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchInsights();
     fetchBenchmark(benchmarkPeriod);
     fetchSectorAllocation();
+    fetchMarketOverview();
   }, []);
 
   const handleBenchmarkPeriodChange = (period) => {
     setBenchmarkPeriod(period);
     fetchBenchmark(period);
+  };
+
+  const handleSelectStock = async (symbol) => {
+    setSelectedSymbol(symbol);
+    setStockFinancialsLoading(true);
+    try {
+      const data = await portfolio.stockFinancials(symbol);
+      setStockFinancials(data);
+    } catch {
+      setStockFinancials(null);
+    } finally {
+      setStockFinancialsLoading(false);
+    }
+  };
+
+  const handleCloseStockPanel = () => {
+    setSelectedSymbol(null);
+    setStockFinancials(null);
   };
 
   const formatCurrency = (val) => {
@@ -437,6 +679,20 @@ export default function DashboardPage() {
     : sectorData;
   const pieData = (effectiveSectorData?.slices || []).map((s) => ({ name: s.sector, value: s.value }));
 
+  const demoMarketOverview = {
+    data_status: "live",
+    indices: [
+      { symbol: "^NSEI", label: "NIFTY 50", price: 24812.35, change: 118.4, change_pct: 0.48 },
+      { symbol: "^BSESN", label: "SENSEX", price: 81456.2, change: -92.1, change_pct: -0.11 },
+    ],
+    top_gainers: [
+      { symbol: "TCS", change_pct: 7.87, current_value: 69120 },
+      { symbol: "RELIANCE", change_pct: 4.77, current_value: 65880 },
+    ],
+    top_losers: [],
+  };
+  const effectiveMarketOverview = (!isLinked && demoMode) ? demoMarketOverview : marketOverview;
+
   return (
     <div className="p-6 md:p-12 max-w-[1400px] mx-auto space-y-10 min-h-full">
       {/* Header */}
@@ -512,7 +768,9 @@ export default function DashboardPage() {
             <OnboardingChecklist items={checklistItems} demoMode={demoMode} onToggleDemo={handleToggleDemo} />
           )}
           {!showOnboarding && onboardingComplete && <OnboardingCompleteCard />}
-          
+
+          <MarketOverviewWidget data={effectiveMarketOverview} loading={marketOverviewLoading} />
+
           {/* Stats grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard icon={Briefcase} label="Current Value" value={formatCurrency(totalValue)} />
@@ -608,8 +866,13 @@ export default function DashboardPage() {
                       const pnlVal = currentVal - invested;
                       const pnlPctVal = invested > 0 ? (pnlVal / invested) * 100 : 0;
                       const pos = pnlVal >= 0;
+                      const symbol = h.tradingsymbol || h.symbol;
                       return (
-                        <tr key={i} className="hover:bg-[var(--color-surface-overlay)] transition-colors duration-200 group">
+                        <tr
+                          key={i}
+                          onClick={() => symbol && handleSelectStock(symbol)}
+                          className={`hover:bg-[var(--color-surface-overlay)] transition-colors duration-200 group ${symbol ? "cursor-pointer" : ""}`}
+                        >
                           <td className="px-8 py-5 font-semibold text-[var(--color-text-primary)]">
                             {h.tradingsymbol || h.symbol || "—"}
                             {h.exchange && <span className="ml-2 px-2 py-0.5 rounded text-[10px] bg-[var(--color-border)] text-[var(--color-text-secondary)] font-medium uppercase tracking-wider">{h.exchange}</span>}
@@ -682,6 +945,17 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       )}
+
+      <AnimatePresence>
+        {selectedSymbol && (
+          <StockFinancialsPanel
+            symbol={selectedSymbol}
+            data={stockFinancials}
+            loading={stockFinancialsLoading}
+            onClose={handleCloseStockPanel}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

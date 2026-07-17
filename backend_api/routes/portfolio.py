@@ -4,16 +4,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend_api.core.security import get_current_user
 from backend_api.database.token_store import (
+    get_cached_fundamentals,
     get_cached_sector,
     get_stale_or_missing_sectors,
+    is_fundamentals_stale_or_missing,
+    upsert_fundamentals_cache,
     upsert_sector_cache,
 )
 from backend_api.models.schemas import (
     BenchmarkPoint,
     BenchmarkResponse,
+    HoldingMover,
+    IndexSnapshot,
+    MarketOverviewResponse,
     PortfolioSummaryResponse,
     SectorAllocationResponse,
     SectorSlice,
+    StockFinancialsResponse,
+    StockFundamentals,
 )
 from backend_api.services.broker_token_service import broker_token_service
 from backend_api.services.market_data_service import market_data_service
@@ -436,4 +444,120 @@ def portfolio_sector_allocation(
             linked=True,
             data_status="sector_data_unavailable",
             message=f"Sector allocation is temporarily unavailable: {exc}",
+        )
+
+
+@router.get("/stock/{symbol}")
+def stock_financials(
+    symbol: str,
+    current_user: dict = Depends(get_current_user),
+) -> StockFinancialsResponse:
+    user_id = str(current_user.get("sub"))
+    symbol = symbol.strip().upper()
+
+    holdings, _short_circuit = _get_live_holdings(user_id)
+    holding = None
+    if holdings:
+        for item in holdings:
+            item_symbol = (item.get("tradingsymbol") or item.get("symbol") or "").upper()
+            if item_symbol == symbol:
+                holding = item
+                break
+
+    try:
+        if is_fundamentals_stale_or_missing(symbol=symbol):
+            data = market_data_service.fetch_fundamentals(symbol)
+            upsert_fundamentals_cache(symbol=symbol, data=data)
+
+        cached = get_cached_fundamentals(symbol=symbol)
+        data = cached.get("data") if cached else None
+
+        if not data:
+            return StockFinancialsResponse(
+                linked=holdings is not None,
+                data_status="market_data_unavailable",
+                message=f"Fundamentals for {symbol} are temporarily unavailable.",
+                symbol=symbol,
+                holding=holding,
+            )
+
+        return StockFinancialsResponse(
+            linked=holdings is not None,
+            data_status="live",
+            message="Fundamentals loaded.",
+            symbol=symbol,
+            holding=holding,
+            fundamentals=StockFundamentals(symbol=symbol, **data),
+        )
+    except Exception as exc:
+        return StockFinancialsResponse(
+            linked=holdings is not None,
+            data_status="market_data_unavailable",
+            message=f"Fundamentals fetch is temporarily unavailable: {exc}",
+            symbol=symbol,
+            holding=holding,
+        )
+
+
+@router.get("/market-overview")
+def market_overview(current_user: dict = Depends(get_current_user)) -> MarketOverviewResponse:
+    user_id = str(current_user.get("sub"))
+
+    try:
+        index_defs = [("^NSEI", "NIFTY 50"), ("^BSESN", "SENSEX")]
+        indices = []
+        for ticker_symbol, label in index_defs:
+            snapshot = market_data_service.fetch_index_snapshot(ticker_symbol, label)
+            if snapshot:
+                indices.append(IndexSnapshot(**snapshot))
+
+        holdings, _short_circuit = _get_live_holdings(user_id)
+        movers: list[HoldingMover] = []
+        if holdings:
+            for item in holdings:
+                symbol = item.get("tradingsymbol") or item.get("symbol")
+                if not symbol:
+                    continue
+                quantity = _to_float(item.get("quantity"), default=0.0)
+                average_price = _to_float(item.get("average_price"), default=0.0)
+                last_price = _to_float(item.get("last_price"), default=0.0)
+                if average_price <= 0:
+                    continue
+                change_pct = (last_price - average_price) / average_price * 100.0
+                movers.append(
+                    HoldingMover(
+                        symbol=symbol,
+                        change_pct=round(change_pct, 2),
+                        current_value=round(quantity * last_price, 2),
+                    )
+                )
+
+        movers_sorted = sorted(movers, key=lambda m: m.change_pct, reverse=True)
+        top_gainers = [m for m in movers_sorted if m.change_pct > 0][:5]
+        top_losers = sorted(
+            [m for m in movers_sorted if m.change_pct < 0], key=lambda m: m.change_pct
+        )[:5]
+
+        if not indices:
+            return MarketOverviewResponse(
+                linked=holdings is not None,
+                data_status="market_data_unavailable",
+                message="Market index data is temporarily unavailable.",
+                top_gainers=top_gainers,
+                top_losers=top_losers,
+            )
+
+        return MarketOverviewResponse(
+            linked=holdings is not None,
+            data_status="live",
+            message="Market overview loaded.",
+            indices=indices,
+            top_gainers=top_gainers,
+            top_losers=top_losers,
+        )
+    except Exception as exc:
+        return MarketOverviewResponse(
+            linked=False,
+            data_status="market_data_unavailable",
+            message=f"Market overview is temporarily unavailable: {exc}",
         )
