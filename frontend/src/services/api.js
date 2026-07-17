@@ -110,6 +110,19 @@ export const upstox = {
     }),
 };
 
+/* ── Alerts ───────────────────────────────────────── */
+export const alerts = {
+  list: () => request("/alerts"),
+  create: (payload) =>
+    request("/alerts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  remove: (id) => request(`/alerts/${id}`, { method: "DELETE" }),
+  dismiss: (id) => request(`/alerts/${id}/dismiss`, { method: "POST" }),
+  reset: (id) => request(`/alerts/${id}/reset`, { method: "POST" }),
+};
+
 /* ── Health ────────────────────────────────────────── */
 export const health = {
   check: () => request("/health"),

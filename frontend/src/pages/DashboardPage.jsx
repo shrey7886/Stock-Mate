@@ -16,8 +16,9 @@ import {
   Square,
   X,
   BarChart3,
+  BellPlus,
 } from "lucide-react";
-import { portfolio, chat } from "../services/api";
+import { portfolio, chat, alerts } from "../services/api";
 import {
   PieChart,
   Pie,
@@ -358,6 +359,75 @@ function MarketOverviewWidget({ data, loading }) {
   );
 }
 
+function SetAlertForm({ symbol, defaultPrice }) {
+  const [direction, setDirection] = useState("above");
+  const [targetPrice, setTargetPrice] = useState(defaultPrice ? String(defaultPrice) : "");
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  const handleSave = async () => {
+    const price = Number(targetPrice);
+    if (!price || price <= 0) {
+      setFeedback({ type: "error", text: "Enter a valid target price." });
+      return;
+    }
+    setSaving(true);
+    setFeedback(null);
+    try {
+      await alerts.create({ symbol, target_price: price, direction });
+      setFeedback({ type: "success", text: "Alert saved." });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-2xl bg-[var(--color-surface-overlay)] border border-[var(--color-border)] space-y-3">
+      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+        <BellPlus size={14} /> Set Price Alert
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex rounded-xl overflow-hidden border border-[var(--color-border)] shrink-0">
+          {["above", "below"].map((d) => (
+            <button
+              key={d}
+              onClick={() => setDirection(d)}
+              className={`px-3 py-2 text-xs font-semibold capitalize transition-colors ${
+                direction === d
+                  ? "bg-[var(--color-brand)] text-white"
+                  : "bg-[var(--color-surface)] text-[var(--color-text-secondary)]"
+              }`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+        <input
+          type="number"
+          value={targetPrice}
+          onChange={(e) => setTargetPrice(e.target.value)}
+          placeholder="Target price"
+          className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-brand)]"
+        />
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 rounded-xl bg-[var(--color-brand)] text-white text-xs font-semibold disabled:opacity-50 shrink-0"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+      {feedback && (
+        <p className={`text-xs font-medium ${feedback.type === "error" ? "text-red-500" : "text-[var(--color-brand)]"}`}>
+          {feedback.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function StockFinancialsPanel({ symbol, data, loading, onClose }) {
   const f = data?.fundamentals;
   const holding = data?.holding;
@@ -404,6 +474,12 @@ function StockFinancialsPanel({ symbol, data, loading, onClose }) {
         </button>
 
         <h2 className="text-2xl font-display font-semibold text-[var(--color-text-primary)]">{symbol}</h2>
+
+        {!loading && (
+          <div className="mt-5">
+            <SetAlertForm symbol={symbol} defaultPrice={holding?.last_price} />
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-3 mt-6">

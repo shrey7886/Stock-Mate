@@ -9,6 +9,7 @@ import BrokerPage from "./pages/BrokerPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import NewsDigestPage from "./pages/NewsDigestPage";
 import ThemedBasketsPage from "./pages/ThemedBasketsPage";
+import AlertsPage from "./pages/AlertsPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -52,6 +53,10 @@ export default function App() {
       <Route
         path="/baskets"
         element={<ProtectedRoute><AppShell><ThemedBasketsPage /></AppShell></ProtectedRoute>}
+      />
+      <Route
+        path="/alerts"
+        element={<ProtectedRoute><AppShell><AlertsPage /></AppShell></ProtectedRoute>}
       />
 
       {/* Fallback */}
