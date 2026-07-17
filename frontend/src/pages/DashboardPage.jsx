@@ -849,6 +849,7 @@ export default function DashboardPage() {
                   <thead className="bg-[var(--color-surface-overlay)]/50">
                     <tr className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-[2px]">
                       <th className="text-left font-bold px-8 py-5">Symbol</th>
+                      <th className="text-left font-bold px-8 py-5">Broker</th>
                       <th className="text-right font-bold px-8 py-5">Qty</th>
                       <th className="text-right font-bold px-8 py-5">Avg Price</th>
                       <th className="text-right font-bold px-8 py-5">LTP</th>
@@ -876,6 +877,11 @@ export default function DashboardPage() {
                           <td className="px-8 py-5 font-semibold text-[var(--color-text-primary)]">
                             {h.tradingsymbol || h.symbol || "—"}
                             {h.exchange && <span className="ml-2 px-2 py-0.5 rounded text-[10px] bg-[var(--color-border)] text-[var(--color-text-secondary)] font-medium uppercase tracking-wider">{h.exchange}</span>}
+                          </td>
+                          <td className="px-8 py-5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] bg-[var(--color-surface-overlay)] text-[var(--color-text-muted)] font-semibold uppercase tracking-wider border border-[var(--color-border-subtle)]">
+                              {h._source === "upstox" ? "Upstox" : "Zerodha"}
+                            </span>
                           </td>
                           <td className="px-8 py-5 text-right text-[var(--color-text-secondary)] font-medium">{qty}</td>
                           <td className="px-8 py-5 text-right text-[var(--color-text-secondary)] font-medium">{formatCurrency(avgPrice)}</td>

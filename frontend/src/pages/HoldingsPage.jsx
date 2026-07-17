@@ -168,6 +168,7 @@ export default function HoldingsPage() {
               <thead className="bg-[var(--color-surface-overlay)]/50">
                 <tr className="border-b border-[var(--color-border-subtle)] text-[11px] text-[var(--color-text-muted)] uppercase tracking-[2px]">
                   <th className="text-left px-8 py-5 font-bold">Stock</th>
+                  <th className="text-left px-8 py-5 font-bold">Broker</th>
                   <th className="text-right px-8 py-5 font-bold">Qty</th>
                   <th className="text-right px-8 py-5 font-bold">Avg Price</th>
                   <th className="text-right px-8 py-5 font-bold">LTP</th>
@@ -178,7 +179,7 @@ export default function HoldingsPage() {
               <tbody className="divide-y divide-[var(--color-border-subtle)]">
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-20 text-[15px] font-light text-[var(--color-text-muted)] bg-[var(--color-surface)]">
+                    <td colSpan={7} className="text-center py-20 text-[15px] font-light text-[var(--color-text-muted)] bg-[var(--color-surface)]">
                       {search ? "No matching holdings found." : "No holdings found. Link your broker to see data."}
                     </td>
                   </tr>
@@ -209,6 +210,11 @@ export default function HoldingsPage() {
                               )}
                             </div>
                           </div>
+                        </td>
+                        <td className="px-8 py-5">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-[var(--color-surface-overlay)] text-[var(--color-text-muted)] font-semibold uppercase tracking-wider border border-[var(--color-border-subtle)]">
+                            {h._source === "upstox" ? "Upstox" : "Zerodha"}
+                          </span>
                         </td>
                         <td className="text-right px-8 py-5 text-[15px] text-[var(--color-text-secondary)] font-medium tabular-nums">
                           {h.quantity}

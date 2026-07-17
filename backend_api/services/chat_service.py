@@ -7,23 +7,20 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from backend_api.services.zerodha_service import ZerodhaService
 from llm_orchestrator.pipelines.portfolio_explanation_pipeline import ChatReply, pipeline
 from llm_orchestrator.utils.portfolio_analytics import build_portfolio_analytics
 from llm_orchestrator.utils.proactive_insights import generate_proactive_insights
 
-_zerodha = ZerodhaService()
-
 
 def _fetch_portfolio_summary(user_id: str) -> dict:
     """
-    Attempt to get live portfolio data.
-    Falls back to an empty portfolio if Zerodha is not linked or unavailable.
+    Attempt to get live portfolio data, merged across every linked broker.
+    Falls back to an empty portfolio if no broker is linked or unavailable.
     """
-    from backend_api.database.token_store import get_decrypted_broker_tokens
+    from backend_api.routes.portfolio import _get_live_holdings
 
-    tokens = get_decrypted_broker_tokens(user_id=user_id, provider="zerodha")
-    if not tokens:
+    holdings, _short_circuit = _get_live_holdings(user_id)
+    if not holdings:
         return {
             "account_id": None,
             "holdings": [],
@@ -33,30 +30,19 @@ def _fetch_portfolio_summary(user_id: str) -> dict:
             "total_pnl_pct": 0.0,
         }
 
-    try:
-        holdings = _zerodha.fetch_holdings(access_token=tokens.get("access_token", ""))
-        total_invested = sum(float(h.get("average_price", 0)) * float(h.get("quantity", 0)) for h in holdings)
-        total_current = sum(float(h.get("last_price", 0)) * float(h.get("quantity", 0)) for h in holdings)
-        total_pnl = total_current - total_invested
-        total_pnl_pct = (total_pnl / total_invested * 100.0) if total_invested > 0 else 0.0
+    total_invested = sum(float(h.get("average_price", 0)) * float(h.get("quantity", 0)) for h in holdings)
+    total_current = sum(float(h.get("last_price", 0)) * float(h.get("quantity", 0)) for h in holdings)
+    total_pnl = total_current - total_invested
+    total_pnl_pct = (total_pnl / total_invested * 100.0) if total_invested > 0 else 0.0
 
-        return {
-            "account_id": tokens.get("account_id"),
-            "holdings": holdings,
-            "total_invested": round(total_invested, 2),
-            "total_current_value": round(total_current, 2),
-            "total_pnl": round(total_pnl, 2),
-            "total_pnl_pct": round(total_pnl_pct, 2),
-        }
-    except Exception:
-        return {
-            "account_id": tokens.get("account_id"),
-            "holdings": [],
-            "total_invested": 0.0,
-            "total_current_value": 0.0,
-            "total_pnl": 0.0,
-            "total_pnl_pct": 0.0,
-        }
+    return {
+        "account_id": None,
+        "holdings": holdings,
+        "total_invested": round(total_invested, 2),
+        "total_current_value": round(total_current, 2),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_pct": round(total_pnl_pct, 2),
+    }
 
 
 def chat(user_id: str, message: str, response_mode: str = "quick") -> ChatReply:

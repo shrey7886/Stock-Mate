@@ -36,6 +36,22 @@ class BrokerTokenService:
             scopes="read_holdings,read_orders",
         )
 
+    def save_upstox_tokens(
+        self,
+        *,
+        user_id: str,
+        account_id: str | None,
+        access_token: str,
+    ) -> None:
+        upsert_broker_tokens(
+            user_id=user_id,
+            provider="upstox",
+            account_id=account_id,
+            access_token=access_token,
+            public_token=None,
+            scopes="read_holdings",
+        )
+
     def save_oauth_state(self, *, user_id: str, provider: str, state: str, ttl_minutes: int = 15) -> None:
         save_oauth_state(user_id=user_id, provider=provider, state=state, ttl_minutes=ttl_minutes)
 

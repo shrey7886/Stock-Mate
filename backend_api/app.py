@@ -10,6 +10,7 @@ from backend_api.routes.health import router as health_router
 from backend_api.routes.portfolio import router as portfolio_router
 from backend_api.routes.user import router as user_router
 from backend_api.routes.zerodha import router as zerodha_router
+from backend_api.routes.upstox import router as upstox_router
 from backend_api.routes.inference import router as inference_router
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
 	app.include_router(portfolio_router)
 	app.include_router(chat_router)
 	app.include_router(zerodha_router)
+	app.include_router(upstox_router)
 	app.include_router(inference_router)
 
 	@app.on_event("startup")

@@ -95,6 +95,21 @@ export const zerodha = {
     }),
 };
 
+/* ── Upstox ───────────────────────────────────────── */
+export const upstox = {
+  start: () => request("/upstox/start"),
+  status: () => request("/upstox/status"),
+  accounts: () => request("/upstox/accounts"),
+  unlink: (accountId) =>
+    request(`/upstox/unlink${accountId ? `?account_id=${accountId}` : ""}`, {
+      method: "POST",
+    }),
+  setPrimary: (accountId) =>
+    request(`/upstox/accounts/primary?account_id=${encodeURIComponent(accountId)}`, {
+      method: "POST",
+    }),
+};
+
 /* ── Health ────────────────────────────────────────── */
 export const health = {
   check: () => request("/health"),
