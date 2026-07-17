@@ -58,6 +58,16 @@ export const portfolio = {
   marketOverview: () => request("/portfolio/market-overview"),
 };
 
+/* ── News ─────────────────────────────────────────── */
+export const news = {
+  digest: () => request("/portfolio/news"),
+};
+
+/* ── Baskets ──────────────────────────────────────── */
+export const baskets = {
+  list: () => request("/portfolio/baskets"),
+};
+
 /* ── Chat ─────────────────────────────────────────── */
 export const chat = {
   send: (message, sessionId, responseMode = "quick") =>

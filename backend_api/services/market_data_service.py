@@ -146,5 +146,42 @@ class MarketDataService:
             logger.warning("yfinance index snapshot fetch failed for %s: %s", ticker_symbol, exc)
             return None
 
+    def fetch_news(self, base_symbol: str, limit: int = 8) -> list[dict] | None:
+        if not _HAS_YFINANCE:
+            return None
+
+        for suffix in (".NS", ".BO"):
+            try:
+                ticker = yf.Ticker(f"{base_symbol}{suffix}")
+                raw_items = ticker.news
+                if not raw_items:
+                    continue
+                articles = []
+                for item in raw_items[:limit]:
+                    if not isinstance(item, dict):
+                        continue
+                    content = item.get("content", item)
+                    title = content.get("title") or item.get("title")
+                    if not title:
+                        continue
+                    link = (
+                        (content.get("canonicalUrl") or {}).get("url")
+                        or (content.get("clickThroughUrl") or {}).get("url")
+                        or item.get("link")
+                    )
+                    publisher = (content.get("provider") or {}).get("displayName") or item.get("publisher")
+                    pub_date = content.get("pubDate") or item.get("providerPublishTime")
+                    articles.append({
+                        "title": title,
+                        "publisher": publisher,
+                        "link": link,
+                        "published_at": str(pub_date) if pub_date else None,
+                    })
+                if articles:
+                    return articles
+            except Exception as exc:
+                logger.warning("yfinance news fetch failed for %s%s: %s", base_symbol, suffix, exc)
+        return None
+
 
 market_data_service = MarketDataService()

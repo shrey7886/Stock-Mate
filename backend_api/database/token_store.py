@@ -13,6 +13,17 @@ from backend_api.core.config import settings
 
 DB_PATH = Path(__file__).resolve().parent / "backend.db"
 
+_SEED_BASKETS = [
+    ("Electric Vehicles", "Companies driving India's EV transition", ["TATAMOTORS", "M&M", "EXIDEIND", "AMARAJABAT", "TVSMOTOR"]),
+    ("Banking", "Leading private and public sector banks", ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK"]),
+    ("IT Services", "India's IT services and software exporters", ["TCS", "INFY", "WIPRO", "HCLTECH", "TECHM"]),
+    ("Pharma", "Pharmaceutical and healthcare majors", ["SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "APOLLOHOSP"]),
+    ("FMCG", "Consumer goods and retail staples", ["HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "DABUR"]),
+    ("Renewable Energy", "Solar, wind, and green energy plays", ["ADANIGREEN", "TATAPOWER", "SUZLON", "NTPC", "NHPC"]),
+    ("Infrastructure", "Construction, cement, and infra majors", ["LT", "ULTRACEMCO", "GRASIM", "ADANIPORTS", "SHREECEM"]),
+    ("PSU", "Government-owned enterprises", ["SBIN", "NTPC", "COALINDIA", "ONGC", "BHEL"]),
+]
+
 
 def _build_fernet_key(secret: str) -> bytes:
     raw = secret.encode("utf-8")
@@ -110,6 +121,34 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS news_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL UNIQUE,
+                data_json TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_baskets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                theme TEXT NOT NULL UNIQUE,
+                description TEXT,
+                symbols_json TEXT NOT NULL
+            )
+            """
+        )
+        for theme, description, symbols in _SEED_BASKETS:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO stock_baskets (theme, description, symbols_json)
+                VALUES (?, ?, ?)
+                """,
+                (theme, description, json.dumps(symbols)),
+            )
 
         # Backward-compatible migration: old schema had `state` instead of `state_hash`
         cols = [r[1] for r in conn.execute("PRAGMA table_info(oauth_states)").fetchall()]
@@ -700,3 +739,62 @@ def is_fundamentals_stale_or_missing(*, symbol: str, max_age_days: int = 1) -> b
             (symbol, f"-{max_age_days} days"),
         ).fetchone()
     return row is None
+
+
+# ── News cache ────────────────────────────────────────────────────────────
+
+def get_cached_news(*, symbol: str) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT symbol, data_json, updated_at FROM news_cache WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row[1]) if row[1] else None
+    except (TypeError, ValueError):
+        data = None
+    return {"symbol": row[0], "data": data, "updated_at": row[2]}
+
+
+def upsert_news_cache(*, symbol: str, data: list[dict] | None) -> None:
+    data_json = json.dumps(data) if data is not None else None
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO news_cache (symbol, data_json)
+            VALUES (?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                data_json=excluded.data_json,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (symbol, data_json),
+        )
+        conn.commit()
+
+
+def is_news_stale_or_missing(*, symbol: str, max_age_days: int = 1) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT symbol FROM news_cache
+            WHERE symbol = ?
+              AND updated_at >= datetime('now', ?)
+            """,
+            (symbol, f"-{max_age_days} days"),
+        ).fetchone()
+    return row is None
+
+
+# ── Stock baskets ─────────────────────────────────────────────────────────
+
+def get_all_baskets() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT theme, description, symbols_json FROM stock_baskets ORDER BY theme"
+        ).fetchall()
+    return [
+        {"theme": row[0], "description": row[1], "symbols": json.loads(row[2])}
+        for row in rows
+    ]
