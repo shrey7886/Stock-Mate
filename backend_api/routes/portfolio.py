@@ -8,11 +8,13 @@ from backend_api.database.token_store import (
     get_cached_fundamentals,
     get_cached_news,
     get_cached_sector,
+    get_ranked_basket,
     get_stale_or_missing_sectors,
     is_fundamentals_stale_or_missing,
     is_news_stale_or_missing,
     upsert_fundamentals_cache,
     upsert_news_cache,
+    upsert_ranked_basket,
     upsert_sector_cache,
 )
 from backend_api.models.schemas import VixSnapshot
@@ -725,20 +727,39 @@ def themed_baskets(current_user: dict = Depends(get_current_user)) -> ThemedBask
                 if symbol:
                     held_symbols.add(symbol)
 
-        baskets = [
-            ThemedBasket(
-                theme=basket["theme"],
-                description=basket["description"],
-                symbols=basket["symbols"],
-                held_symbols=[s for s in basket["symbols"] if s.upper() in held_symbols],
+        baskets = []
+        for basket in get_all_baskets():
+            theme = basket["theme"]
+            description = basket["description"]
+            original_symbols = basket["symbols"]
+
+            # Check for cached ranked symbols (1 day refresh)
+            ranked_symbols = get_ranked_basket(theme=theme)
+
+            if ranked_symbols is None:
+                # Not cached or stale; rank by performance
+                ranked_symbols = market_data_service.rank_stocks_by_performance(
+                    symbols=original_symbols,
+                    max_stocks=5
+                )
+                # Cache the ranked symbols
+                upsert_ranked_basket(theme=theme, ranked_symbols=ranked_symbols)
+
+            held = [s for s in ranked_symbols if s.upper() in held_symbols]
+
+            baskets.append(
+                ThemedBasket(
+                    theme=theme,
+                    description=description,
+                    symbols=ranked_symbols,
+                    held_symbols=held,
+                )
             )
-            for basket in get_all_baskets()
-        ]
 
         return ThemedBasketsResponse(
             linked=holdings is not None,
             data_status="live",
-            message="Themed baskets loaded.",
+            message="Themed baskets loaded with top performers.",
             baskets=baskets,
         )
     except Exception as exc:

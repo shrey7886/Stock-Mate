@@ -157,6 +157,16 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ranked_baskets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                theme TEXT NOT NULL UNIQUE,
+                ranked_symbols_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         for theme, description, symbols in _SEED_BASKETS:
             conn.execute(
                 """
@@ -814,6 +824,41 @@ def get_all_baskets() -> list[dict]:
         {"theme": row[0], "description": row[1], "symbols": json.loads(row[2])}
         for row in rows
     ]
+
+
+def upsert_ranked_basket(*, theme: str, ranked_symbols: list[str]) -> None:
+    """Cache ranked symbols for a basket theme, ordered by performance score."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO ranked_baskets (theme, ranked_symbols_json)
+            VALUES (?, ?)
+            ON CONFLICT(theme) DO UPDATE SET
+                ranked_symbols_json=excluded.ranked_symbols_json,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (theme, json.dumps(ranked_symbols)),
+        )
+        conn.commit()
+
+
+def get_ranked_basket(*, theme: str) -> list[str] | None:
+    """Get cached ranked symbols for a basket theme, or None if stale/missing."""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT ranked_symbols_json FROM ranked_baskets
+            WHERE theme = ?
+              AND updated_at >= datetime('now', '-1 day')
+            """,
+            (theme,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
 
 
 # ── Price alerts ──────────────────────────────────────────────────────────

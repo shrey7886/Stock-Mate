@@ -53,8 +53,8 @@ def chat(user_id: str, message: str, response_mode: str = "quick") -> ChatReply:
         )
     portfolio_summary = _fetch_portfolio_summary(user_id)
 
-    # If no broker is linked, prompt the user to connect their portfolio
-    if portfolio_summary.get("account_id") is None:
+    # If no holdings are available, prompt the user to connect their portfolio
+    if not portfolio_summary.get("holdings"):
         return ChatReply(
             answer=(
                 "It looks like you haven't connected your portfolio yet. "
