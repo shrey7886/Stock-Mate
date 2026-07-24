@@ -209,5 +209,85 @@ class MarketDataService:
                 logger.warning("yfinance news fetch failed for %s%s: %s", base_symbol, suffix, exc)
         return None
 
+    def calculate_performance_score(self, base_symbol: str) -> tuple[float, dict[str, float]] | None:
+        """
+        Calculate a composite performance score for a stock based on:
+        - YTD return (40% weight)
+        - 3M performance (35% weight)
+        - Volume/momentum (25% weight)
+        
+        Returns (score, {"ytd_return": float, "3m_return": float, "momentum": float}) or None if insufficient data.
+        """
+        if not _HAS_YFINANCE:
+            return None
+
+        try:
+            ytd_history = self._history_for_symbol(base_symbol, "ytd")
+            three_m_history = self._history_for_symbol(base_symbol, "3mo")
+            one_d_history = self._history_for_symbol(base_symbol, "5d")
+            
+            if ytd_history is None or ytd_history.empty or three_m_history is None or three_m_history.empty:
+                return None
+
+            # YTD return
+            ytd_open = float(ytd_history["Close"].iloc[0]) if len(ytd_history) > 0 else None
+            ytd_close = float(ytd_history["Close"].iloc[-1]) if len(ytd_history) > 0 else None
+            ytd_return = ((ytd_close - ytd_open) / ytd_open * 100.0) if ytd_open and ytd_close else 0.0
+
+            # 3M return
+            m3_open = float(three_m_history["Close"].iloc[0]) if len(three_m_history) > 0 else None
+            m3_close = float(three_m_history["Close"].iloc[-1]) if len(three_m_history) > 0 else None
+            m3_return = ((m3_close - m3_open) / m3_open * 100.0) if m3_open and m3_close else 0.0
+
+            # Volume momentum (relative volume change)
+            momentum = 0.0
+            if one_d_history is not None and not one_d_history.empty and len(one_d_history) > 1:
+                recent_vol = float(one_d_history["Volume"].iloc[-1]) if "Volume" in one_d_history.columns else 0
+                avg_vol = float(one_d_history["Volume"].mean()) if "Volume" in one_d_history.columns else 0
+                if avg_vol > 0:
+                    momentum = (recent_vol - avg_vol) / avg_vol * 100.0
+
+            # Composite score: YTD (40%), 3M (35%), Momentum (25%)
+            # Normalize scores to 0-100 range for weighting
+            ytd_normalized = max(0, min(100, (ytd_return + 50) / 1.5))  # Map to 0-100
+            m3_normalized = max(0, min(100, (m3_return + 50) / 1.5))
+            momentum_normalized = max(0, min(100, (momentum + 50) / 1.5))
+
+            composite_score = (
+                ytd_normalized * 0.40 +
+                m3_normalized * 0.35 +
+                momentum_normalized * 0.25
+            )
+
+            return (composite_score, {
+                "ytd_return": round(ytd_return, 2),
+                "3m_return": round(m3_return, 2),
+                "momentum": round(momentum, 2),
+            })
+        except Exception as exc:
+            logger.warning("performance score calculation failed for %s: %s", base_symbol, exc)
+            return None
+
+    def rank_stocks_by_performance(self, symbols: list[str], max_stocks: int = 5) -> list[str]:
+        """
+        Rank stocks by composite performance score (YTD, 3M, momentum).
+        Returns top N symbols ordered by score (highest first).
+        Only includes stocks with sufficient data.
+        """
+        scored_stocks: list[tuple[str, float]] = []
+        
+        for symbol in symbols:
+            result = self.calculate_performance_score(symbol)
+            if result is not None:
+                score, _ = result
+                scored_stocks.append((symbol, score))
+
+        if not scored_stocks:
+            return symbols[:max_stocks]
+
+        # Sort by score descending, return top N
+        ranked = sorted(scored_stocks, key=lambda x: x[1], reverse=True)
+        return [symbol for symbol, _ in ranked[:max_stocks]]
+
 
 market_data_service = MarketDataService()
