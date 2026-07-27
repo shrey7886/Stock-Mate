@@ -51,6 +51,14 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Experiment artifacts
+lightning_logs/
+*.ckpt
+*_tft.parquet
+tft_full_universe.parquet
+tft_*.log
+tft_*.csv
+
 # Translations
 *.mo
 *.pot

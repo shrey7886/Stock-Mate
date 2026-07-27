@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import re
+import time
 
 from backend_api.core.config import settings
 from llm_orchestrator.agents.response_agent import ChatReply, ResponseAgent
@@ -32,6 +33,10 @@ from llm_orchestrator.utils.intent_router import (
     intent_supported_for_portfolio,
 )
 from llm_orchestrator.utils.portfolio_analytics import calculate_sip_for_goal
+from llm_orchestrator.utils.quantitative_tools import (
+    build_quantitative_answer,
+    execute_quantitative_tools,
+)
 
 # ── Module-level singletons ────────────────────────────────────────────────
 _agent = ResponseAgent()
@@ -189,6 +194,12 @@ class PortfolioExplanationPipeline:
             total_pnl_pct=portfolio_summary.get("total_pnl_pct", 0.0),
         )
 
+        tool_start = time.perf_counter()
+        tool_results = execute_quantitative_tools(message, holdings=holdings)
+        tool_latency_ms = round((time.perf_counter() - tool_start) * 1000.0, 2)
+        if tool_results:
+            context["quantitative_tools"] = tool_results
+
         confidence_score = estimate_confidence_score(
             intent=detected_intent,
             holdings_count=len(holdings),
@@ -207,6 +218,24 @@ class PortfolioExplanationPipeline:
                 detected_intent=detected_intent,
                 confidence_score=confidence_score,
                 next_steps=next_steps,
+            )
+            _store.add_turn(user_id, "user", message)
+            _store.add_turn(user_id, "assistant", reply.answer)
+            return reply
+
+        direct_answer = build_quantitative_answer(message, tool_results)
+        if direct_answer:
+            reply = ChatReply(
+                answer=direct_answer,
+                action_tag="None",
+                why="Numeric answer derived from deterministic quantitative tooling.",
+                risk_note="Not financial advice — DYOR. (But you already knew that.)",
+                confidence="high",
+                detected_intent=detected_intent,
+                confidence_score=confidence_score,
+                next_steps=next_steps,
+                latency_ms=tool_latency_ms,
+                token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             )
             _store.add_turn(user_id, "user", message)
             _store.add_turn(user_id, "assistant", reply.answer)

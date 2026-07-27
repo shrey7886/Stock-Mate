@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,8 @@ class ChatReply:
     proactive_insights: list[dict] | None = None
     portfolio_health: dict | None = None
     raw_response: str = ""
+    latency_ms: float = 0.0
+    token_usage: dict | None = None
 
 
 _EXTRACTION_INSTRUCTION = textwrap.dedent("""
@@ -111,6 +114,7 @@ class ResponseAgent:
         conversation_history: list[dict],
         response_mode: str = "quick",
     ) -> ChatReply:
+        start_time = time.perf_counter()
         requested_mode = (response_mode or "quick").strip().lower()
         if requested_mode in {"quick", "explain"}:
             mode = requested_mode
@@ -166,7 +170,16 @@ class ResponseAgent:
                 max_tokens=max_tokens,
             )
             raw = response.choices[0].message.content or ""
-            return self._parse(raw, max_words=clamp_words, max_lines=clamp_lines)
+            parsed = self._parse(raw, max_words=clamp_words, max_lines=clamp_lines)
+            parsed.latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                parsed.token_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
+            return parsed
         except Exception as exc:
             return self._fallback_reply(
                 portfolio_context=portfolio_context,
