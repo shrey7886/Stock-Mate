@@ -9,9 +9,8 @@ kiteconnect>=5.0.1
 openai>=1.30.0
 groq>=0.9.0
 
-# RAG — local vector store + local embeddings (no API key needed)
+# RAG — local vector store; embeddings via Hugging Face Inference API (HF_API_TOKEN)
 chromadb>=0.5.0
-sentence-transformers>=3.0.0
 
 # Market data
 yfinance>=0.2.40

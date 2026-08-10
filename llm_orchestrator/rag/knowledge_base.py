@@ -1,6 +1,7 @@
 """
 ChromaDB-based local vector store for StockMate financial knowledge.
-Uses sentence-transformers (all-MiniLM-L6-v2) for embeddings — no API key needed.
+Uses Hugging Face's hosted Inference API (all-MiniLM-L6-v2) for embeddings —
+keeps torch/sentence-transformers out of the backend so it stays light to host.
 Database is persisted to disk at llm_orchestrator/rag/chroma_db/.
 """
 from __future__ import annotations
@@ -9,11 +10,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from llm_orchestrator.rag.hf_embeddings import embed_texts
+
 logger = logging.getLogger(__name__)
 
 _DB_PATH = Path(__file__).parent / "chroma_db"
 _COLLECTION_NAME = "stockmate_finance"
-_EMBED_MODEL = "all-MiniLM-L6-v2"
 
 
 class FinancialKnowledgeBase:
@@ -25,19 +27,16 @@ class FinancialKnowledgeBase:
     def __init__(self) -> None:
         self._client = None
         self._collection = None
-        self._embedder = None
         self._ready = False
 
-    # ── lazy init (avoids slow model load at import time) ─────────────────────
+    # ── lazy init (avoids network calls at import time) ─────────────────────
 
     def _ensure_ready(self) -> None:
         if self._ready:
             return
         try:
             import chromadb
-            from sentence_transformers import SentenceTransformer
 
-            self._embedder = SentenceTransformer(_EMBED_MODEL)
             self._client = chromadb.PersistentClient(path=str(_DB_PATH))
             self._collection = self._client.get_or_create_collection(
                 name=_COLLECTION_NAME,
@@ -69,7 +68,10 @@ class FinancialKnowledgeBase:
             }
             for c in KNOWLEDGE_CHUNKS
         ]
-        embeddings = self._embedder.encode(texts, show_progress_bar=False).tolist()
+        embeddings = embed_texts(texts)
+        if embeddings is None:
+            logger.error("RAG: embedding call failed, skipping index build.")
+            return
 
         # ChromaDB add in one batch
         self._collection.add(
@@ -99,10 +101,12 @@ class FinancialKnowledgeBase:
           - score: cosine similarity score (0–1, higher = more relevant)
         """
         self._ensure_ready()
-        if not self._ready:
+        if not self._ready or self._collection.count() == 0:
             return []
 
-        query_embedding = self._embedder.encode([query], show_progress_bar=False).tolist()
+        query_embedding = embed_texts([query])
+        if query_embedding is None:
+            return []
 
         where_filter = {"topic": topic_filter} if topic_filter else None
 

@@ -89,9 +89,11 @@ LLM_PROVIDER=groq
 GROQ_API_KEY=your-groq-api-key
 # OPENAI_API_KEY=your-openai-api-key
 
-# Optional: powers the sentiment badge on the News Digest page (FinBERT via
-# Hugging Face's hosted Inference API — free token from https://huggingface.co/settings/tokens).
-# Without it, news still loads normally, just without sentiment badges.
+# Optional: powers the News Digest sentiment badges (FinBERT) and the chat
+# assistant's knowledge retrieval (embeddings) — both call Hugging Face's hosted
+# Inference API instead of loading models locally, to keep the backend light to
+# host. Free token from https://huggingface.co/settings/tokens.
+# Without it, news/chat still work, just without sentiment badges / RAG context.
 HF_API_TOKEN=your-hf-token
 ```
 

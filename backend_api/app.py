@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-import threading
 
 from backend_api.core.config import settings
 from backend_api.routes.auth import router as auth_router
@@ -17,16 +16,6 @@ from backend_api.services.alert_service import check_alerts
 
 logger = logging.getLogger(__name__)
 scheduler = None
-
-
-def _warmup_chat_stack() -> None:
-	"""Preload heavy chatbot dependencies to reduce first-query latency."""
-	try:
-		from llm_orchestrator.rag.retriever import rag_retriever
-		rag_retriever.warmup()
-		logger.info("Chat stack warmup finished")
-	except Exception as exc:
-		logger.warning("Chat stack warmup failed: %s", exc)
 
 
 def create_app() -> FastAPI:
@@ -63,8 +52,6 @@ def create_app() -> FastAPI:
 
 	@app.on_event("startup")
 	def _startup_warmup() -> None:
-		threading.Thread(target=_warmup_chat_stack, daemon=True).start()
-
 		global scheduler
 		if scheduler is None:
 			from apscheduler.schedulers.background import BackgroundScheduler
