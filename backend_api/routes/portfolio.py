@@ -37,6 +37,7 @@ from backend_api.models.schemas import (
 )
 from backend_api.services.broker_token_service import broker_token_service
 from backend_api.services.market_data_service import market_data_service
+from backend_api.services.sentiment_service import analyze_sentiment_batch
 from backend_api.services.zerodha_service import zerodha_service
 from backend_api.services.upstox_service import upstox_service
 
@@ -678,6 +679,12 @@ def news_digest(current_user: dict = Depends(get_current_user)) -> NewsDigestRes
         for symbol in symbols:
             if is_news_stale_or_missing(symbol=symbol):
                 data = market_data_service.fetch_news(symbol)
+                if data:
+                    scores = analyze_sentiment_batch([article["title"] for article in data])
+                    for article, score in zip(data, scores):
+                        if score:
+                            article["sentiment_label"] = score["label"]
+                            article["sentiment_score"] = score["score"]
                 upsert_news_cache(symbol=symbol, data=data)
 
             cached = get_cached_news(symbol=symbol)

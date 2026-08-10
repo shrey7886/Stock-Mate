@@ -42,6 +42,8 @@ class Settings:
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    hf_api_token: str = os.getenv("HF_API_TOKEN", "")
+
     chat_session_ttl_minutes: int = int(os.getenv("CHAT_SESSION_TTL_MINUTES", "60"))
     chat_max_history: int = int(os.getenv("CHAT_MAX_HISTORY", "20"))
 

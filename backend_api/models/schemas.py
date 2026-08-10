@@ -248,6 +248,8 @@ class NewsArticle(BaseModel):
     publisher: str | None = None
     link: str | None = None
     published_at: str | None = None
+    sentiment_label: str | None = None
+    sentiment_score: float | None = None
 
 
 class SymbolNews(BaseModel):

@@ -32,7 +32,7 @@ Data is stored in a local SQLite database (`backend_api/database/backend.db`, cr
 - **India VIX Fear & Greed gauge** — a live India VIX reading on the market overview widget, translated into an Extreme Greed / Greed / Neutral / Fear / Extreme Fear sentiment label
 - **Stock financials panel** — click any holding to view its fundamentals (P/E ratio, market cap, dividend yield, 52-week high/low, beta) fetched from yfinance and cached daily
 - **Market overview widget** — live NIFTY 50 and SENSEX levels with day change, the India VIX gauge, plus your top 5 gaining and losing holdings
-- **News digest** — latest headlines for your top holdings (or a default watchlist if unlinked), fetched from yfinance and cached daily
+- **News digest** — latest headlines for your top holdings (or a default watchlist if unlinked), fetched from yfinance and cached daily, each headline scored positive/negative/neutral via FinBERT
 - **Themed stock baskets** — curated stock groupings by theme (EV, Banking, IT Services, Pharma, FMCG, and more), with your own holdings highlighted
 - **AI chat assistant** — natural-language portfolio Q&A with action tags (Hold/Trim/Add/Watch/Rebalance), proactive insights, and portfolio-aware suggested prompts (diversification, riskiest holding, replacement ideas, sector exposure) to get the conversation started
 - **Zerodha & Upstox account linking** — OAuth-based linking/unlinking for both brokers, multiple accounts per broker, primary account selection, holdings from every connected broker merged into one portfolio and badged by source
@@ -88,6 +88,11 @@ UPSTOX_REDIRECT_URL=http://localhost:8000/api/upstox/callback
 LLM_PROVIDER=groq
 GROQ_API_KEY=your-groq-api-key
 # OPENAI_API_KEY=your-openai-api-key
+
+# Optional: powers the sentiment badge on the News Digest page (FinBERT via
+# Hugging Face's hosted Inference API — free token from https://huggingface.co/settings/tokens).
+# Without it, news still loads normally, just without sentiment badges.
+HF_API_TOKEN=your-hf-token
 ```
 
 Run the backend:
@@ -107,6 +112,21 @@ npm run dev
 ```
 
 The dashboard is served at `http://localhost:5174` and proxies API calls to the backend.
+
+## Deploying
+
+**Backend → Render.** `render.yaml` at the repo root defines a web service: builds
+`backend_api/requirements.txt`, runs `uvicorn backend_api.app:app`, and mounts a persistent
+disk at `/var/data` for the SQLite database (set via `DB_PATH`). In the Render dashboard,
+connect the repo, it'll pick up `render.yaml` automatically ("Blueprint" deploy), then fill
+in the `sync: false` env vars (broker keys, `GROQ_API_KEY`, `HF_API_TOKEN`, `FRONTEND_URL` —
+set this to your Vercel URL once you have it). Note: the persistent disk requires a paid
+plan; the free plan works fine for a demo but resets the database on redeploy/restart.
+
+**Frontend → Vercel.** Import the repo with `frontend` as the project root. Before deploying,
+edit `frontend/vercel.json` and replace `YOUR-RENDER-BACKEND-URL` with your actual Render
+service URL — this rewrites `/api/*` requests to the backend so the existing relative-path
+`fetch("/api/...")` calls keep working unchanged and there's no CORS to configure.
 
 ## Broker notes
 
