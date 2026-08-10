@@ -116,12 +116,13 @@ The dashboard is served at `http://localhost:5174` and proxies API calls to the 
 ## Deploying
 
 **Backend → Render.** `render.yaml` at the repo root defines a web service: builds
-`backend_api/requirements.txt`, runs `uvicorn backend_api.app:app`, and mounts a persistent
-disk at `/var/data` for the SQLite database (set via `DB_PATH`). In the Render dashboard,
+`backend_api/requirements.txt`, runs `uvicorn backend_api.app:app`. In the Render dashboard,
 connect the repo, it'll pick up `render.yaml` automatically ("Blueprint" deploy), then fill
 in the `sync: false` env vars (broker keys, `GROQ_API_KEY`, `HF_API_TOKEN`, `FRONTEND_URL` —
-set this to your Vercel URL once you have it). Note: the persistent disk requires a paid
-plan; the free plan works fine for a demo but resets the database on redeploy/restart.
+set this to your Vercel URL once you have it). Note: Render's free plan doesn't support
+persistent disks, so the SQLite database resets on every redeploy/restart — fine for a demo,
+not for real user data. To persist it, upgrade the service to a paid plan, add a disk
+(`mountPath: /var/data`), and set `DB_PATH=/var/data/backend.db` as an env var.
 
 **Frontend → Vercel.** Import the repo with `frontend` as the project root. Before deploying,
 edit `frontend/vercel.json` and replace `YOUR-RENDER-BACKEND-URL` with your actual Render
