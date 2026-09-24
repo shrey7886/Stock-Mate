@@ -4,6 +4,7 @@ import base64
 import hmac
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from cryptography.fernet import Fernet
 
 from backend_api.core.config import settings
 
-DB_PATH = Path(__file__).resolve().parent / "backend.db"
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).resolve().parent / "backend.db")))
 
 _SEED_BASKETS = [
     ("Electric Vehicles", "Companies driving India's EV transition", ["TATAMOTORS", "M&M", "EXIDEIND", "AMARAJABAT", "TVSMOTOR"]),

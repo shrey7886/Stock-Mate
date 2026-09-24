@@ -18,6 +18,23 @@ function Shimmer({ className = "" }) {
   return <div className={`animate-shimmer rounded-2xl bg-[var(--color-surface-overlay)] border border-[var(--color-border-subtle)] ${className}`} />;
 }
 
+const SENTIMENT_STYLES = {
+  positive: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
+  negative: "bg-rose-500/15 text-rose-500 border-rose-500/30",
+  neutral: "bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)] border-[var(--color-text-muted)]/30",
+};
+
+function SentimentBadge({ label }) {
+  if (!label || !SENTIMENT_STYLES[label]) return null;
+  return (
+    <span
+      className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${SENTIMENT_STYLES[label]}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function ArticleRow({ article }) {
   return (
     <a
@@ -28,6 +45,7 @@ function ArticleRow({ article }) {
     >
       <p className="text-sm text-[var(--color-text-primary)] leading-relaxed font-medium flex items-start gap-2">
         <span className="flex-1">{article.title}</span>
+        <SentimentBadge label={article.sentiment_label} />
         <ExternalLink size={13} className="text-[var(--color-text-muted)] group-hover:text-[var(--color-brand)] shrink-0 mt-0.5" />
       </p>
       {(article.publisher || article.published_at) && (

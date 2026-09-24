@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend_api.core.config import settings
 from backend_api.core.security import get_current_user
 from backend_api.database.token_store import (
     get_all_baskets,
@@ -26,6 +27,7 @@ from backend_api.models.schemas import (
     MarketOverviewResponse,
     NewsArticle,
     NewsDigestResponse,
+    OptimizeResponse,
     PortfolioSummaryResponse,
     SectorAllocationResponse,
     SectorSlice,
@@ -37,6 +39,8 @@ from backend_api.models.schemas import (
 )
 from backend_api.services.broker_token_service import broker_token_service
 from backend_api.services.market_data_service import market_data_service
+from backend_api.services.optimizer_service import optimizer_service
+from backend_api.services.sentiment_service import analyze_sentiment_batch
 from backend_api.services.zerodha_service import zerodha_service
 from backend_api.services.upstox_service import upstox_service
 
@@ -428,6 +432,66 @@ def portfolio_benchmark(
         )
 
 
+OPTIMIZE_OBJECTIVES = {"min_vol", "max_sharpe", "black_litterman"}
+
+
+@router.get("/optimize")
+def portfolio_optimize(
+    current_user: dict = Depends(get_current_user),
+    objective: str = Query(default="min_vol"),
+    short_term: str = Query(default="", description="Comma-separated symbols held <= 1 year"),
+) -> OptimizeResponse:
+    user_id = str(current_user.get("sub"))
+    objective = objective if objective in OPTIMIZE_OBJECTIVES else "min_vol"
+    short_term_symbols = {s.strip().upper() for s in short_term.split(",") if s.strip()}
+
+    holdings, short_circuit = _get_live_holdings(user_id)
+    if holdings is None:
+        return OptimizeResponse(user_id=user_id, objective=objective, **short_circuit)
+
+    if not holdings:
+        return OptimizeResponse(
+            user_id=user_id,
+            linked=True,
+            objective=objective,
+            data_status="no_holdings",
+            message="No holdings found to optimize.",
+        )
+
+    try:
+        result = optimizer_service.optimize(
+            holdings=holdings,
+            objective=objective,
+            short_term_symbols=short_term_symbols,
+        )
+    except Exception as exc:
+        return OptimizeResponse(
+            user_id=user_id,
+            linked=True,
+            objective=objective,
+            data_status="optimizer_unavailable",
+            message=f"Portfolio optimization is temporarily unavailable: {exc}",
+        )
+
+    if result is None:
+        return OptimizeResponse(
+            user_id=user_id,
+            linked=True,
+            objective=objective,
+            data_status="insufficient_data",
+            message="Need at least 3 holdings with enough price history (~1 year) to optimize.",
+        )
+
+    return OptimizeResponse(
+        user_id=user_id,
+        linked=True,
+        objective=objective,
+        data_status="live",
+        message="Optimization computed from 3 years of historical prices.",
+        **result,
+    )
+
+
 @router.get("/sector-allocation")
 def portfolio_sector_allocation(
     current_user: dict = Depends(get_current_user),
@@ -678,12 +742,26 @@ def news_digest(current_user: dict = Depends(get_current_user)) -> NewsDigestRes
         for symbol in symbols:
             if is_news_stale_or_missing(symbol=symbol):
                 data = market_data_service.fetch_news(symbol)
+                if data:
+                    scores = analyze_sentiment_batch([article["title"] for article in data])
+                    for article, score in zip(data, scores):
+                        if score:
+                            article["sentiment_label"] = score["label"]
+                            article["sentiment_score"] = score["score"]
                 upsert_news_cache(symbol=symbol, data=data)
 
             cached = get_cached_news(symbol=symbol)
             articles = cached.get("data") if cached else None
             if not articles:
                 continue
+
+            if settings.hf_api_token and any(a.get("sentiment_label") is None for a in articles):
+                scores = analyze_sentiment_batch([a["title"] for a in articles])
+                for article, score in zip(articles, scores):
+                    if score:
+                        article["sentiment_label"] = score["label"]
+                        article["sentiment_score"] = score["score"]
+                upsert_news_cache(symbol=symbol, data=articles)
 
             items.append(
                 SymbolNews(
