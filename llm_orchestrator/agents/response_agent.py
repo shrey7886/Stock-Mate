@@ -162,14 +162,27 @@ class ResponseAgent:
             messages.append({"role": turn["role"], "content": turn["content"]})
         messages.append({"role": "user", "content": cleaned_user_message})
 
+        # Reasoning models (gpt-oss) spend hidden reasoning tokens from the same max_tokens budget;
+        # with a small cap they return an empty reply. Keep reasoning short and leave room for the answer.
+        extra: dict = {}
+        if "gpt-oss" in (self._model or ""):
+            extra["reasoning_effort"] = "low"
+            max_tokens += 1024
+
         try:
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
                 temperature=0.5,
                 max_tokens=max_tokens,
+                **extra,
             )
             raw = response.choices[0].message.content or ""
+            if not raw.strip():
+                return self._fallback_reply(
+                    portfolio_context=portfolio_context,
+                    reason=f"LLM returned an empty reply (finish_reason={response.choices[0].finish_reason}).",
+                )
             parsed = self._parse(raw, max_words=clamp_words, max_lines=clamp_lines)
             parsed.latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             usage = getattr(response, "usage", None)

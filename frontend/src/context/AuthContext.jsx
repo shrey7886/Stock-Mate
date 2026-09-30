@@ -31,15 +31,9 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // Registration only creates the account; the user then signs in explicitly.
   const register = useCallback(async ({ email, password, displayName }) => {
-    setLoading(true);
-    try {
-      const data = await authAPI.register({ email, password, display_name: displayName });
-      _persist(data, email);
-      return data;
-    } finally {
-      setLoading(false);
-    }
+    return authAPI.register({ email, password, display_name: displayName });
   }, []);
 
   const forgotPassword = useCallback(async (email) => {

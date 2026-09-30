@@ -1,0 +1,2 @@
+{"tier": 2, "case": "RELIANCE.NS:rsi14", "arm": "A_deployed", "repeat": 2, "truth": 25.66, "parsed": null, "strict": false, "lenient": false, "abs_err": null, "raw": "", "latency_ms": null, "tokens": null, "attempts": 8, "failed": true}
+{"tier": 2, "case": "TCS.NS:total_return", "arm": "A_deployed", "repeat": 0, "truth": -0.61, "parsed": null, "strict": false, "lenient": false, "abs_err": null, "raw": "", "latency_ms": null, "tokens": null, "attempts": 8, "failed": true}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import math
 import re
 from typing import Any
@@ -124,6 +125,12 @@ _STOPWORDS = {
     "was",
     "were",
     "be",
+    "nse",
+    "bse",
+    "inr",
+    "usd",
+    "pnl",
+    "etf",
 }
 
 
@@ -139,30 +146,62 @@ def _normalize_symbol(token: str) -> str | None:
     return cleaned.upper()
 
 
+def _holding_ticker(holding: dict) -> str | None:
+    """Map a broker holding (Upstox/Zerodha schema) to its Yahoo ticker, e.g. IDEA on NSE -> IDEA.NS."""
+    symbol = str(holding.get("tradingsymbol") or holding.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    if any(ch in symbol for ch in ".^="):
+        return symbol
+    return symbol + (".BO" if str(holding.get("exchange") or "").upper().startswith("BSE") else ".NS")
+
+
 def _extract_symbols(message: str, holdings: list[dict] | None = None) -> list[str]:
-    tokens = re.findall(r"[A-Za-z][A-Za-z0-9.\-^=]*", message or "")
-    seen: set[str] = set()
+    """Symbols explicitly named in the message. Plain words ("portfolio", "maximum") are never tickers."""
+    held = {}
+    for holding in holdings or []:
+        ticker = _holding_ticker(holding)
+        if ticker:
+            held[ticker.split(".")[0].lower()] = ticker
+
     symbols: list[str] = []
-
-    if holdings:
-        for holding in holdings:
-            sym = str(holding.get("tradingsymbol") or "").strip()
-            if sym and sym.lower() not in {s.lower() for s in seen}:
-                seen.add(sym)
-                symbols.append(sym)
-
-    for token in tokens:
-        if token.lower() in _STOPWORDS:
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9.\-^=]*", message or ""):
+        token = token.rstrip(".-")
+        key = token.lower()
+        if key in _STOPWORDS:
             continue
-        symbol = _normalize_symbol(token)
-        if not symbol:
+        if key in held:
+            symbol = held[key]
+        elif key in _SYMBOL_ALIASES or key.endswith((".ns", ".bo", "=f")):
+            symbol = _normalize_symbol(token)
+        elif token.isupper() and len(token) >= 2:  # ponytail: bare ALL-CAPS word = ticker (AAPL); lowercase names need an alias
+            symbol = token
+        else:
             continue
-        if symbol.lower() in {s.lower() for s in seen}:
-            continue
-        seen.add(symbol)
-        symbols.append(symbol)
-
+        if symbol and symbol not in symbols:
+            symbols.append(symbol)
     return symbols
+
+
+def portfolio_value_series(holdings: list[dict], *, period: str = "2y", interval: str = "1d") -> pd.Series:
+    """Daily value of the current holdings held over the window: sum(quantity x close)."""
+    quantities: dict[str, float] = {}
+    for holding in holdings:
+        ticker = _holding_ticker(holding)
+        qty = float(holding.get("quantity") or 0.0)
+        if ticker and qty:
+            quantities[ticker] = quantities.get(ticker, 0.0) + qty
+    if not quantities:
+        raise ValueError("No holdings with a quantity to build a portfolio series")
+    prices = _fetch_price_histories(list(quantities), period=period, interval=interval)
+    closes = pd.concat([prices[t].iloc[:, 0].rename(t) for t in quantities], axis=1, join="inner").dropna()
+    if len(closes) < 2:
+        raise ValueError("Not enough overlapping price history for the portfolio")
+    return (closes * pd.Series(quantities)).sum(axis=1)
+
+
+def _series(symbol: str, period: str, interval: str, prices: pd.Series | None) -> pd.Series:
+    return prices if prices is not None else _fetch_price_history(symbol, period=period, interval=interval).iloc[:, 0]
 
 
 _PRICE_HISTORY_CACHE: dict[tuple[str, str, str], pd.DataFrame] = {}
@@ -255,14 +294,13 @@ def calculate_correlation(symbol_a: str, symbol_b: str, *, period: str = "2y", i
     }
 
 
-def calculate_beta(symbol: str, *, benchmark: str = "^NSEI", period: str = "2y", interval: str = "1d") -> dict[str, Any]:
+def calculate_beta(symbol: str, *, benchmark: str = "^NSEI", period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
     if pd is None or np is None:
         raise RuntimeError("pandas/numpy is not available")
 
-    prices = _fetch_price_histories([symbol, benchmark], period=period, interval=interval)
-    stock = prices[symbol]
-    bench = prices[benchmark]
-    merged = stock.join(bench, how="inner")
+    bench = _fetch_price_history(benchmark, period=period, interval=interval).iloc[:, 0].rename("bench")
+    stock = _series(symbol, period, interval, prices).rename("stock")
+    merged = pd.concat([stock, bench], axis=1, join="inner").dropna()
     if merged.empty or len(merged) < 2:
         raise ValueError("Not enough data for a beta estimate")
 
@@ -273,7 +311,7 @@ def calculate_beta(symbol: str, *, benchmark: str = "^NSEI", period: str = "2y",
         raise ValueError("Not enough data for beta")
 
     cov = float(np.cov(aligned.iloc[:, 0], aligned.iloc[:, 1])[0][1])
-    var = float(np.var(aligned.iloc[:, 1]))
+    var = float(np.var(aligned.iloc[:, 1], ddof=1))  # same ddof as np.cov
     beta = cov / var if var else None
     return {
         "tool": "beta",
@@ -284,12 +322,11 @@ def calculate_beta(symbol: str, *, benchmark: str = "^NSEI", period: str = "2y",
     }
 
 
-def calculate_volatility(symbol: str, *, period: str = "2y", interval: str = "1d", window: int = 30) -> dict[str, Any]:
+def calculate_volatility(symbol: str, *, period: str = "2y", interval: str = "1d", window: int = 30, prices: pd.Series | None = None) -> dict[str, Any]:
     if pd is None or np is None:
         raise RuntimeError("pandas/numpy is not available")
 
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     if returns.empty:
         raise ValueError("Not enough data for volatility")
 
@@ -304,12 +341,11 @@ def calculate_volatility(symbol: str, *, period: str = "2y", interval: str = "1d
     }
 
 
-def calculate_drawdown(symbol: str, *, period: str = "2y", interval: str = "1d") -> dict[str, Any]:
+def calculate_drawdown(symbol: str, *, period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
     if pd is None:
         raise RuntimeError("pandas is not available")
 
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
+    series = _series(symbol, period, interval, prices)
     cum_max = series.cummax()
     drawdown = (series / cum_max - 1.0) * 100.0
     return {
@@ -320,18 +356,22 @@ def calculate_drawdown(symbol: str, *, period: str = "2y", interval: str = "1d")
     }
 
 
-def _detect_period(text: str) -> str:
-    if "5 year" in text or "5y" in text:
-        return "5y"
-    if "6 month" in text or "6mo" in text or "6-month" in text:
-        return "6mo"
-    if "1 month" in text or "1mo" in text or "1-month" in text:
-        return "1mo"
-    if "90-day" in text or "90 day" in text:
-        return "3mo"
-    if "past year" in text or "last year" in text or "1 year" in text or "1y" in text:
-        return "1y"
-    return "2y"
+_PERIOD_PATTERNS = [
+    (r"\b5[- ]?y(ears?|rs?)?\b|\bfive years?\b", "5y"),
+    (r"\b2[- ]?y(ears?|rs?)?\b|\btwo years?\b", "2y"),
+    (r"\b6[- ]?mo(nths?)?\b|\bsix months?\b", "6mo"),
+    (r"\b3[- ]?mo(nths?)?\b|\b90[- ]?days?\b|\bthree months?\b|\bquarter\b", "3mo"),
+    (r"\b1[- ]?mo(nths?)?\b|\bone month\b", "1mo"),
+    (r"\b1[- ]?y(ears?|rs?)?\b|\b12[- ]?months?\b|\b(past|last|one) year\b", "1y"),
+]
+
+
+def _detect_period(text: str) -> str | None:
+    """Look-back window named in the message, or None so each metric keeps its own default."""
+    for pattern, period in _PERIOD_PATTERNS:
+        if re.search(pattern, text or "", re.IGNORECASE):
+            return period
+    return None
 
 
 def _annualized_rate(series: pd.Series) -> float | None:
@@ -348,12 +388,11 @@ def _annualized_rate(series: pd.Series) -> float | None:
     return annualized
 
 
-def calculate_sharpe_ratio(symbol: str, *, risk_free_rate: float = 0.05, period: str = "2y", interval: str = "1d") -> dict[str, Any]:
+def calculate_sharpe_ratio(symbol: str, *, risk_free_rate: float = 0.05, period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
     if pd is None or np is None:
         raise RuntimeError("pandas/numpy is not available")
 
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     if returns.empty:
         raise ValueError("Not enough data for Sharpe ratio")
 
@@ -371,9 +410,8 @@ def calculate_sharpe_ratio(symbol: str, *, risk_free_rate: float = 0.05, period:
     }
 
 
-def calculate_total_return(symbol: str, *, period: str = "1y", interval: str = "1d") -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
+def calculate_total_return(symbol: str, *, period: str = "1y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
+    series = _series(symbol, period, interval, prices)
     if len(series) < 2:
         raise ValueError("Not enough data for total return")
     total_return = float(series.iloc[-1] / series.iloc[0] - 1.0) * 100.0
@@ -385,9 +423,8 @@ def calculate_total_return(symbol: str, *, period: str = "1y", interval: str = "
     }
 
 
-def calculate_cagr(symbol: str, *, period: str = "2y", interval: str = "1d") -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
+def calculate_cagr(symbol: str, *, period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
+    series = _series(symbol, period, interval, prices)
     cagr = _annualized_rate(series)
     if cagr is None:
         raise ValueError("Not enough data for CAGR")
@@ -399,12 +436,10 @@ def calculate_cagr(symbol: str, *, period: str = "2y", interval: str = "1d") -> 
     }
 
 
-def calculate_momentum(symbol: str, *, period: str = "1mo", interval: str = "1d", lookback: int = 21) -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
-    if len(series) < lookback + 1:
-        prices = _fetch_price_history(symbol, period="3mo", interval=interval)
-        series = prices.iloc[:, 0]
+def calculate_momentum(symbol: str, *, period: str = "1mo", interval: str = "1d", lookback: int = 21, prices: pd.Series | None = None) -> dict[str, Any]:
+    series = _series(symbol, period, interval, prices)
+    if len(series) < lookback + 1 and prices is None:
+        series = _fetch_price_history(symbol, period="3mo", interval=interval).iloc[:, 0]
     if len(series) < lookback + 1:
         raise ValueError("Not enough data for momentum")
     momentum = float((series.iloc[-1] / series.iloc[-1 - lookback] - 1.0) * 100.0)
@@ -416,9 +451,8 @@ def calculate_momentum(symbol: str, *, period: str = "1mo", interval: str = "1d"
     }
 
 
-def calculate_value_at_risk(symbol: str, *, period: str = "3mo", interval: str = "1d", confidence: float = 0.95) -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+def calculate_value_at_risk(symbol: str, *, period: str = "3mo", interval: str = "1d", confidence: float = 0.95, prices: pd.Series | None = None) -> dict[str, Any]:
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     if returns.empty:
         raise ValueError("Not enough data for VaR")
     var_pct = float(-np.percentile(returns, (1.0 - confidence) * 100.0) * 100.0)
@@ -431,9 +465,8 @@ def calculate_value_at_risk(symbol: str, *, period: str = "3mo", interval: str =
     }
 
 
-def calculate_downside_deviation(symbol: str, *, period: str = "2y", interval: str = "1d", target: float = 0.0) -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+def calculate_downside_deviation(symbol: str, *, period: str = "2y", interval: str = "1d", target: float = 0.0, prices: pd.Series | None = None) -> dict[str, Any]:
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     downside = returns[returns < target]
     if downside.empty:
         downside_dev = 0.0
@@ -447,9 +480,8 @@ def calculate_downside_deviation(symbol: str, *, period: str = "2y", interval: s
     }
 
 
-def calculate_sortino_ratio(symbol: str, *, risk_free_rate: float = 0.05, period: str = "2y", interval: str = "1d") -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+def calculate_sortino_ratio(symbol: str, *, risk_free_rate: float = 0.05, period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     if returns.empty:
         raise ValueError("Not enough data for Sortino ratio")
     downside = returns[returns < 0.0]
@@ -471,9 +503,8 @@ def calculate_sortino_ratio(symbol: str, *, risk_free_rate: float = 0.05, period
     }
 
 
-def calculate_moving_average(symbol: str, *, window: int = 50, period: str = "2y", interval: str = "1d") -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
+def calculate_moving_average(symbol: str, *, window: int = 50, period: str = "2y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
+    series = _series(symbol, period, interval, prices)
     if len(series) < window:
         raise ValueError("Not enough data for moving average")
     ma = float(series.rolling(window).mean().iloc[-1])
@@ -485,9 +516,8 @@ def calculate_moving_average(symbol: str, *, window: int = 50, period: str = "2y
     }
 
 
-def calculate_rsi(symbol: str, *, period: str = "1y", interval: str = "1d", window: int = 14) -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    series = prices.iloc[:, 0]
+def calculate_rsi(symbol: str, *, period: str = "1y", interval: str = "1d", window: int = 14, prices: pd.Series | None = None) -> dict[str, Any]:
+    series = _series(symbol, period, interval, prices)
     returns = series.diff().dropna()
     gains = returns.clip(lower=0.0)
     losses = -returns.clip(upper=0.0)
@@ -510,9 +540,8 @@ def calculate_rsi(symbol: str, *, period: str = "1y", interval: str = "1d", wind
     }
 
 
-def calculate_mean_daily_return(symbol: str, *, period: str = "1y", interval: str = "1d") -> dict[str, Any]:
-    prices = _fetch_price_history(symbol, period=period, interval=interval)
-    returns = _daily_returns(prices.iloc[:, 0])
+def calculate_mean_daily_return(symbol: str, *, period: str = "1y", interval: str = "1d", prices: pd.Series | None = None) -> dict[str, Any]:
+    returns = _daily_returns(_series(symbol, period, interval, prices))
     if returns.empty:
         raise ValueError("Not enough data for mean daily return")
     mean_pct = float(returns.mean() * 100.0)
@@ -552,6 +581,66 @@ def calculate_portfolio_concentration(holdings: list[dict]) -> dict[str, Any]:
     }
 
 
+def calculate_portfolio_classification(holdings: list[dict]) -> dict[str, Any]:
+    if not holdings:
+        return {
+            "tool": "portfolio_classification",
+            "holdings": [],
+            "total_invested": 0.0,
+            "total_current_value": 0.0,
+            "total_pnl": 0.0,
+            "total_pnl_pct": 0.0,
+            "decision": "Hold",
+        }
+
+    holding_rows = []
+    total_invested = 0.0
+    total_current_value = 0.0
+    for holding in holdings:
+        symbol = holding.get("symbol") or holding.get("tradingsymbol") or "UNKNOWN"
+        qty = float(holding.get("quantity") or 0.0)
+        avg_price = float(holding.get("average_price") or 0.0)
+        last_price = float(holding.get("last_price") or 0.0)
+        invested_value = qty * avg_price
+        current_value = qty * last_price
+        pnl = current_value - invested_value
+        pnl_pct = ((current_value - invested_value) / invested_value * 100.0) if invested_value else 0.0
+        total_invested += invested_value
+        total_current_value += current_value
+        holding_rows.append(
+            {
+                "symbol": symbol,
+                "quantity": qty,
+                "invested_value": round(invested_value, 2),
+                "current_value": round(current_value, 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl_pct, 2),
+            }
+        )
+
+    total_pnl = total_current_value - total_invested
+    total_pnl_pct = ((total_pnl / total_invested) * 100.0) if total_invested else 0.0
+
+    if total_pnl_pct >= 10.0:
+        decision = "Buy"
+    elif total_pnl_pct > 0.0:
+        decision = "Hold"
+    elif total_pnl_pct > -10.0:
+        decision = "Trim"
+    else:
+        decision = "Exit"
+
+    return {
+        "tool": "portfolio_classification",
+        "holdings": holding_rows,
+        "total_invested": round(total_invested, 2),
+        "total_current_value": round(total_current_value, 2),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_pct": round(total_pnl_pct, 2),
+        "decision": decision,
+    }
+
+
 def _interpret_correlation(correlation: float) -> str:
     if correlation >= 0.7:
         return "Strong positive relationship"
@@ -564,140 +653,115 @@ def _interpret_correlation(correlation: float) -> str:
     return "Weak or near-zero relationship"
 
 
+_TOOL_FUNCTIONS = {
+    "beta": calculate_beta,
+    "sharpe": calculate_sharpe_ratio,
+    "sortino": calculate_sortino_ratio,
+    "var": calculate_value_at_risk,
+    "downside_deviation": calculate_downside_deviation,
+    "moving_average": calculate_moving_average,
+    "rsi": calculate_rsi,
+    "momentum": calculate_momentum,
+    "cagr": calculate_cagr,
+    "mean_daily_return": calculate_mean_daily_return,
+    "total_return": calculate_total_return,
+    "volatility": calculate_volatility,
+    "drawdown": calculate_drawdown,
+}
+
+# First match wins, so order matters (e.g. "value at risk" must win over the generic "risk").
+_ROUTES = [
+    ("beta", r"\bbeta\b"),
+    ("sharpe", r"sharpe|risk[- ]adjusted"),
+    ("sortino", r"sortino"),
+    ("var", r"\bvar\b|value at risk"),
+    ("downside_deviation", r"downside"),
+    ("moving_average", r"moving average|\b(50|200)[- ]day\b"),
+    ("rsi", r"\brsi\b|relative strength"),
+    ("momentum", r"momentum|\b1-month\b"),
+    ("cagr", r"cagr|compound annual|annuali[sz]ed"),
+    ("mean_daily_return", r"(mean|average) daily return"),
+    ("total_return", r"total return|return of|past year|6[- ]month return|annual return"),
+    ("volatility", r"volatility|variance|standard deviation|\brisk\b"),
+    ("drawdown", r"drawdown|worst decline|crash"),
+]
+
+_CLASSIFICATION_KEYWORDS = (
+    "invested value",
+    "current value",
+    "profit or loss",
+    "percentage profit or loss",
+    "classify the portfolio",
+    "classify portfolio",
+    "buy, hold, trim, or exit",
+    "buy hold trim or exit",
+    "portfolio as buy",
+)
+
+
 def select_quantitative_tools(message: str, holdings: list[dict] | None = None) -> list[dict[str, Any]]:
     text = (message or "").lower()
-    tools: list[dict[str, Any]] = []
-
+    symbols = _extract_symbols(message, holdings=holdings)
     period = _detect_period(message)
-    if any(keyword in text for keyword in ["correlation", "correlate", "co-move", "co move"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if len(symbols) >= 2:
-            tools.append({"name": "correlation", "kwargs": {"symbol_a": symbols[0], "symbol_b": symbols[1]}})
-            return tools
 
-    if "beta" in text:
-        symbols = _extract_symbols(message, holdings=holdings)
+    if any(keyword in text for keyword in ["correlation", "correlate", "co-move", "co move"]) and len(symbols) >= 2:
+        return [{"name": "correlation", "kwargs": {"symbol_a": symbols[0], "symbol_b": symbols[1]}}]
+
+    for name, pattern in _ROUTES:
+        if not re.search(pattern, text):
+            continue
         if symbols:
-            tools.append({"name": "beta", "kwargs": {"symbol": symbols[0], "benchmark": "^NSEI"}})
-            return tools
+            kwargs: dict[str, Any] = {"symbol": symbols[0]}
+        elif holdings:
+            kwargs = {"holdings": holdings}  # no stock named -> the metric is for the whole portfolio
+        else:
+            continue
+        if period:
+            kwargs["period"] = period
+        if name == "moving_average":
+            kwargs["window"] = 200 if "200" in text else 50
+        return [{"name": name, "kwargs": kwargs}]
 
-    if any(keyword in text for keyword in ["sharpe", "risk-adjusted", "risk adjusted"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "sharpe", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if "sortino" in text:
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "sortino", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if any(keyword in text for keyword in ["var", "value at risk"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "var", "kwargs": {"symbol": symbols[0], "period": period}})
-            return tools
-
-    if any(keyword in text for keyword in ["downside deviation", "downside"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "downside_deviation", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if any(keyword in text for keyword in ["moving average", "50-day", "200-day", "50 day", "200 day"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            window = 200 if "200" in text else 50
-            tools.append({"name": "moving_average", "kwargs": {"symbol": symbols[0], "window": window}})
-            return tools
-
-    if "rsi" in text:
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "rsi", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if any(keyword in text for keyword in ["momentum", "momentum of", "1-month"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "momentum", "kwargs": {"symbol": symbols[0], "period": period}})
-            return tools
-
-    if any(keyword in text for keyword in ["cagr", "compound annual", "annualized", "annualised"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "cagr", "kwargs": {"symbol": symbols[0], "period": period}})
-            return tools
-
-    if any(keyword in text for keyword in ["mean daily return", "average daily return"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "mean_daily_return", "kwargs": {"symbol": symbols[0], "period": period}})
-            return tools
-
-    if any(keyword in text for keyword in ["total return", "return of", "past year", "6-month return", "6 month return", "annual return"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "total_return", "kwargs": {"symbol": symbols[0], "period": period}})
-            return tools
-
-    if any(keyword in text for keyword in ["volatility", "variance", "standard deviation", "risk"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "volatility", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if any(keyword in text for keyword in ["drawdown", "max drawdown", "worst decline", "crash"]):
-        symbols = _extract_symbols(message, holdings=holdings)
-        if symbols:
-            tools.append({"name": "drawdown", "kwargs": {"symbol": symbols[0]}})
-            return tools
-
-    if any(keyword in text for keyword in ["concentrat", "allocation", "weight", "overweight", "underweight"]):
-        if holdings:
-            tools.append({"name": "concentration", "kwargs": {"holdings": holdings}})
+    tools: list[dict[str, Any]] = []
+    if holdings and any(keyword in text for keyword in ["concentrat", "allocation", "weight", "overweight", "underweight"]):
+        tools.append({"name": "concentration", "kwargs": {"holdings": holdings}})
+    if holdings and any(keyword in text for keyword in _CLASSIFICATION_KEYWORDS):
+        tools.append({"name": "portfolio_classification", "kwargs": {"holdings": holdings}})
     return tools
 
-    return tools
+
+def _run_metric(name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    fn = _TOOL_FUNCTIONS[name]
+    holdings = kwargs.pop("holdings", None)
+    period = kwargs.pop("period", None)
+    if period is None:
+        # Portfolio momentum needs > 21 closes, which the 1mo default cannot give without a refetch.
+        period = "3mo" if name == "momentum" and holdings else inspect.signature(fn).parameters["period"].default
+    if holdings:
+        tickers = [t for t in (_holding_ticker(h) for h in holdings) if t]
+        series = portfolio_value_series(holdings, period=period)
+        result = fn(f"your portfolio ({', '.join(tickers)})", period=period, prices=series, **kwargs)
+        result["scope"] = "portfolio"
+    else:
+        result = fn(kwargs.pop("symbol"), period=period, **kwargs)
+    result.setdefault("period", period)
+    return result
 
 
 def execute_quantitative_tools(message: str, holdings: list[dict] | None = None) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for tool in select_quantitative_tools(message, holdings=holdings):
         name = tool["name"]
-        kwargs = tool.get("kwargs", {})
+        kwargs = dict(tool.get("kwargs", {}))
         try:
             if name == "correlation":
                 result = calculate_correlation(kwargs["symbol_a"], kwargs["symbol_b"])
-            elif name == "beta":
-                result = calculate_beta(kwargs["symbol"], benchmark=kwargs.get("benchmark", "^NSEI"))
-            elif name == "volatility":
-                result = calculate_volatility(kwargs["symbol"])
-            elif name == "drawdown":
-                result = calculate_drawdown(kwargs["symbol"])
-            elif name == "sharpe":
-                result = calculate_sharpe_ratio(kwargs["symbol"])
             elif name == "concentration":
                 result = calculate_portfolio_concentration(kwargs.get("holdings") or [])
-            elif name == "total_return":
-                result = calculate_total_return(kwargs["symbol"], period=kwargs.get("period", "1y"))
-            elif name == "cagr":
-                result = calculate_cagr(kwargs["symbol"], period=kwargs.get("period", "2y"))
-            elif name == "momentum":
-                result = calculate_momentum(kwargs["symbol"], period=kwargs.get("period", "1mo"))
-            elif name == "var":
-                result = calculate_value_at_risk(kwargs["symbol"], period=kwargs.get("period", "3mo"))
-            elif name == "sortino":
-                result = calculate_sortino_ratio(kwargs["symbol"], period=kwargs.get("period", "2y"))
-            elif name == "downside_deviation":
-                result = calculate_downside_deviation(kwargs["symbol"], period=kwargs.get("period", "2y"))
-            elif name == "moving_average":
-                result = calculate_moving_average(kwargs["symbol"], window=kwargs.get("window", 50))
-            elif name == "rsi":
-                result = calculate_rsi(kwargs["symbol"], period=kwargs.get("period", "1y"))
-            elif name == "mean_daily_return":
-                result = calculate_mean_daily_return(kwargs["symbol"], period=kwargs.get("period", "1y"))
+            elif name == "portfolio_classification":
+                result = calculate_portfolio_classification(kwargs.get("holdings") or [])
+            elif name in _TOOL_FUNCTIONS:
+                result = _run_metric(name, kwargs)
             else:
                 result = {"tool": name, "status": "unsupported"}
 
@@ -709,6 +773,16 @@ def execute_quantitative_tools(message: str, holdings: list[dict] | None = None)
 
 
 def build_quantitative_answer(message: str, tool_results: list[dict[str, Any]]) -> str | None:
+    answer = _format_quantitative_answer(tool_results)
+    if not answer:
+        return None
+    result = next((item.get("result") or {} for item in tool_results if item.get("status") == "ok"), {})
+    if result.get("period") and result.get("tool") not in {"total_return", "cagr", "var"}:
+        answer += f" (Based on {result['period']} of daily closing prices.)"
+    return answer
+
+
+def _format_quantitative_answer(tool_results: list[dict[str, Any]]) -> str | None:
     if not tool_results:
         return None
     successful = [item for item in tool_results if item.get("status") == "ok"]
@@ -811,5 +885,18 @@ def build_quantitative_answer(message: str, tool_results: list[dict[str, Any]]) 
         if largest is None:
             return None
         return f"Your largest holding weight is {largest:.2f}%, based on the current portfolio snapshot."
+
+    if tool_name == "portfolio_classification":
+        total_invested = result.get("total_invested")
+        total_current = result.get("total_current_value")
+        pnl = result.get("total_pnl")
+        pnl_pct = result.get("total_pnl_pct")
+        decision = result.get("decision")
+        if total_invested is None or total_current is None or pnl is None or pnl_pct is None:
+            return None
+        return (
+            f"Portfolio summary: invested value = ₹{total_invested:.2f}, current value = ₹{total_current:.2f}, "
+            f"profit or loss = ₹{pnl:.2f}, percentage profit or loss = {pnl_pct:.2f}%. Decision: {decision}."
+        )
 
     return None

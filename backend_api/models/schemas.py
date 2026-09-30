@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "backend_api"
+    checks: dict[str, dict[str, object]] = Field(default_factory=dict)
+    message: str = "Backend service is healthy"
 
 
 class ZerodhaStartResponse(BaseModel):

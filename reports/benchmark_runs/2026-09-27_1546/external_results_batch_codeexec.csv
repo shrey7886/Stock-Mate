@@ -1,0 +1,53 @@
+case,model,repeat,final_answer,seconds,notes
+upstox_snapshot:total_invested,chatgpt-gpt5.6-luna,1,89,,whole pack in one chat; computed with code
+upstox_snapshot:total_current_value,chatgpt-gpt5.6-luna,1,83,,whole pack in one chat; computed with code
+upstox_snapshot:total_pnl,chatgpt-gpt5.6-luna,1,-6,,whole pack in one chat; computed with code
+upstox_snapshot:total_pnl_pct,chatgpt-gpt5.6-luna,1,-6.741573033707865,,whole pack in one chat; computed with code
+upstox_snapshot:decision,chatgpt-gpt5.6-luna,1,Trim,,whole pack in one chat; computed with code
+realistic_8:total_invested,chatgpt-gpt5.6-luna,1,609742.2,,whole pack in one chat; computed with code
+realistic_8:total_current_value,chatgpt-gpt5.6-luna,1,685857.65,,whole pack in one chat; computed with code
+realistic_8:total_pnl,chatgpt-gpt5.6-luna,1,76115.45,,whole pack in one chat; computed with code
+realistic_8:total_pnl_pct,chatgpt-gpt5.6-luna,1,12.483218317511906,,whole pack in one chat; computed with code
+realistic_8:decision,chatgpt-gpt5.6-luna,1,Buy,,whole pack in one chat; computed with code
+RELIANCE.NS:total_return,chatgpt-gpt5.6-luna,1,-6.987330248084356,,whole pack in one chat; computed with code
+RELIANCE.NS:max_drawdown,chatgpt-gpt5.6-luna,1,-8.660473479172904,,whole pack in one chat; computed with code
+RELIANCE.NS:var95,chatgpt-gpt5.6-luna,1,1.6906190398986176,,whole pack in one chat; computed with code
+RELIANCE.NS:rsi14,chatgpt-gpt5.6-luna,1,26.21500106437456,,whole pack in one chat; computed with code
+TCS.NS:total_return,chatgpt-gpt5.6-luna,1,-0.6062920704635433,,whole pack in one chat; computed with code
+TCS.NS:max_drawdown,chatgpt-gpt5.6-luna,1,-15.834579779278002,,whole pack in one chat; computed with code
+TCS.NS:var95,chatgpt-gpt5.6-luna,1,2.7529780972234836,,whole pack in one chat; computed with code
+TCS.NS:rsi14,chatgpt-gpt5.6-luna,1,22.49871329087864,,whole pack in one chat; computed with code
+HDFCBANK.NS:total_return,chatgpt-gpt5.6-luna,1,-7.622755242998858,,whole pack in one chat; computed with code
+HDFCBANK.NS:max_drawdown,chatgpt-gpt5.6-luna,1,-17.201903958546726,,whole pack in one chat; computed with code
+HDFCBANK.NS:var95,chatgpt-gpt5.6-luna,1,2.190017902253192,,whole pack in one chat; computed with code
+HDFCBANK.NS:rsi14,chatgpt-gpt5.6-luna,1,61.62574971774917,,whole pack in one chat; computed with code
+portfolio:sharpe,chatgpt-gpt5.6-luna,1,-4.276637143194789,,whole pack in one chat; computed with code
+portfolio:var95,chatgpt-gpt5.6-luna,1,2.379686725638761,,whole pack in one chat; computed with code
+portfolio:max_drawdown,chatgpt-gpt5.6-luna,1,-20.774828328379613,,whole pack in one chat; computed with code
+portfolio:total_return,chatgpt-gpt5.6-luna,1,-19.26720099927136,,whole pack in one chat; computed with code
+upstox_snapshot:total_invested,claude-sonnet5-low,1,89,,whole pack in one chat; ran 4 code commands
+upstox_snapshot:total_current_value,claude-sonnet5-low,1,83,,whole pack in one chat; ran 4 code commands
+upstox_snapshot:total_pnl,claude-sonnet5-low,1,-6,,whole pack in one chat; ran 4 code commands
+upstox_snapshot:total_pnl_pct,claude-sonnet5-low,1,-6.741573,,whole pack in one chat; ran 4 code commands
+upstox_snapshot:decision,claude-sonnet5-low,1,Trim,,whole pack in one chat; ran 4 code commands
+realistic_8:total_invested,claude-sonnet5-low,1,609742.2,,whole pack in one chat; ran 4 code commands
+realistic_8:total_current_value,claude-sonnet5-low,1,685857.65,,whole pack in one chat; ran 4 code commands
+realistic_8:total_pnl,claude-sonnet5-low,1,76115.45,,whole pack in one chat; ran 4 code commands
+realistic_8:total_pnl_pct,claude-sonnet5-low,1,12.483218,,whole pack in one chat; ran 4 code commands
+realistic_8:decision,claude-sonnet5-low,1,Buy,,whole pack in one chat; ran 4 code commands
+RELIANCE.NS:total_return,claude-sonnet5-low,1,-6.98733,,whole pack in one chat; ran 4 code commands
+RELIANCE.NS:max_drawdown,claude-sonnet5-low,1,-8.660473,,whole pack in one chat; ran 4 code commands
+RELIANCE.NS:var95,claude-sonnet5-low,1,1.690619,,whole pack in one chat; ran 4 code commands
+RELIANCE.NS:rsi14,claude-sonnet5-low,1,25.655977,,whole pack in one chat; ran 4 code commands
+TCS.NS:total_return,claude-sonnet5-low,1,-0.606292,,whole pack in one chat; ran 4 code commands
+TCS.NS:max_drawdown,claude-sonnet5-low,1,-15.83458,,whole pack in one chat; ran 4 code commands
+TCS.NS:var95,claude-sonnet5-low,1,2.752978,,whole pack in one chat; ran 4 code commands
+TCS.NS:rsi14,claude-sonnet5-low,1,22.205795,,whole pack in one chat; ran 4 code commands
+HDFCBANK.NS:total_return,claude-sonnet5-low,1,-7.622755,,whole pack in one chat; ran 4 code commands
+HDFCBANK.NS:max_drawdown,claude-sonnet5-low,1,-17.201904,,whole pack in one chat; ran 4 code commands
+HDFCBANK.NS:var95,claude-sonnet5-low,1,2.190018,,whole pack in one chat; ran 4 code commands
+HDFCBANK.NS:rsi14,claude-sonnet5-low,1,61.398728,,whole pack in one chat; ran 4 code commands
+portfolio:sharpe,claude-sonnet5-low,1,-4.276637,,whole pack in one chat; ran 4 code commands
+portfolio:var95,claude-sonnet5-low,1,2.379687,,whole pack in one chat; ran 4 code commands
+portfolio:max_drawdown,claude-sonnet5-low,1,-20.774828,,whole pack in one chat; ran 4 code commands
+portfolio:total_return,claude-sonnet5-low,1,-19.267201,,whole pack in one chat; ran 4 code commands

@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [resetSent, setResetSent] = useState(false);
 
   const isRegister = mode === "register";
@@ -24,6 +25,7 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setNotice("");
     setResetSent(false);
 
     if (isForgot) {
@@ -55,10 +57,14 @@ export default function LoginPage() {
     try {
       if (isRegister) {
         await register({ email: email.trim(), password, displayName: displayName.trim() || undefined });
+        // Account created: switch to Sign In with the email kept, so the user signs in next.
+        setMode("login");
+        setPassword("");
+        setNotice("Account created successfully. Please sign in.");
       } else {
         await login({ email: email.trim(), password });
+        navigate("/dashboard");
       }
-      navigate("/dashboard");
     } catch (err) {
       setError(err.message || (isRegister ? "Registration failed" : "Login failed"));
     } finally {
@@ -133,7 +139,8 @@ export default function LoginPage() {
               {["login", "register"].map((m) => (
                 <button
                   key={m}
-                  onClick={() => { setMode(m); setError(""); setResetSent(false); }}
+                  type="button"
+                  onClick={() => { setMode(m); setError(""); setNotice(""); setResetSent(false); }}
                   className={`flex-1 py-3 text-[13px] font-semibold rounded-xl tracking-wide uppercase transition-all duration-300 ${mode === m
                       ? "bg-[var(--color-surface-raised)] text-[var(--color-text-primary)] shadow-sm border border-[var(--color-border)]"
                       : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -174,6 +181,18 @@ export default function LoginPage() {
                 >
                   <CheckCircle2 size={18} />
                   Reset link sent to your email!
+                </motion.div>
+              )}
+              {notice && (
+                <motion.div
+                  key="notice"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex items-center gap-3 px-5 py-4 rounded-2xl bg-[var(--color-brand)]/10 border border-[var(--color-brand)]/20 text-[var(--color-brand)] text-sm font-medium shadow-sm"
+                >
+                  <CheckCircle2 size={18} />
+                  {notice}
                 </motion.div>
               )}
             </AnimatePresence>

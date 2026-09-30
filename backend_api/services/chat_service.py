@@ -58,7 +58,7 @@ def chat(user_id: str, message: str, response_mode: str = "quick") -> ChatReply:
         return ChatReply(
             answer=(
                 "It looks like you haven't connected your portfolio yet. "
-                "Head over to the **Broker** page to link your Zerodha account "
+                "Head over to the **Broker** page to link your Zerodha or Upstox account "
                 "and I'll be able to give you personalized insights!"
             ),
             action_tag="None",

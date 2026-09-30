@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-27) - do not cite these numbers.** This run had measurement errors: the "accuracy proxy" compared the first number in each answer (so "6-month" matched "6-month"; the real baseline match rate was 0/11), the LLM baseline was given no price data, and portfolio prompts routed to wrong tickers. See `RESEARCH_HANDOUT.md` and `benchmark_runs/` for the corrected benchmark.
+
 # Quantitative benchmark report
 
 ## Summary

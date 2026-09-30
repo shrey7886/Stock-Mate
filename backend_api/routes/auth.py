@@ -51,7 +51,7 @@ def register(payload: RegisterRequest) -> RegisterResponse:
         display_name=payload.display_name,
     )
     if not success:
-        raise HTTPException(status_code=409, detail="An account with this email already exists")
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Please sign in.")
 
     token = create_jwt_token(user_id=user_id, email=payload.email.strip().lower())
     return RegisterResponse(
@@ -67,12 +67,13 @@ def login(payload: LoginRequest) -> LoginResponse:
     if not payload.email or not payload.password:
         raise HTTPException(status_code=400, detail="Email and password are required")
 
-    user = get_user_by_email(payload.email.strip().lower())
+    normalized_email = payload.email.strip().lower()
+    user = get_user_by_email(normalized_email)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=404, detail="Account does not exist. Please register first.")
 
     if not _verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
 
     token = create_jwt_token(user_id=user["user_id"], email=user["email"])
     return LoginResponse(access_token=token, token_type="bearer", user_id=user["user_id"])

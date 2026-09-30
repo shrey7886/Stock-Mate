@@ -1,3 +1,4 @@
+import math
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from llm_orchestrator.utils.quantitative_tools import (
     _extract_symbols,
     build_quantitative_answer,
     calculate_correlation,
+    execute_quantitative_tools,
     select_quantitative_tools,
 )
 
@@ -82,6 +84,51 @@ def test_extract_symbols_ignores_metric_keywords() -> None:
     assert "AAPL" in symbols
     assert "^NSEI" in symbols
     assert "BETA" not in symbols
+
+
+UPSTOX_HOLDINGS = [
+    {"tradingsymbol": "IDEA", "exchange": "NSE", "quantity": 2, "average_price": 13, "last_price": 15},
+    {"tradingsymbol": "SUZLON", "exchange": "NSE", "quantity": 1, "average_price": 53, "last_price": 45},
+]
+
+
+def test_portfolio_prompts_use_whole_portfolio_not_plain_words() -> None:
+    # Regression: "portfolio", "this", "maximum" used to be sent to Yahoo as tickers.
+    for prompt, tool in [
+        ("What is the Sharpe ratio of the portfolio?", "sharpe"),
+        ("What is the 90-day Value at Risk for this portfolio?", "var"),
+        ("What is the maximum drawdown for this portfolio?", "drawdown"),
+    ]:
+        selected = select_quantitative_tools(prompt, holdings=UPSTOX_HOLDINGS)
+        assert selected[0]["name"] == tool
+        assert selected[0]["kwargs"]["holdings"] == UPSTOX_HOLDINGS
+    assert select_quantitative_tools("What is the 90-day VaR of my portfolio?", holdings=UPSTOX_HOLDINGS)[0]["kwargs"]["period"] == "3mo"
+
+
+def test_holding_symbols_map_to_exchange_tickers() -> None:
+    # Regression: bare "IDEA" resolves to a US penny stock on Yahoo; Vodafone Idea is IDEA.NS.
+    assert _extract_symbols("Sharpe ratio of idea?", holdings=UPSTOX_HOLDINGS) == ["IDEA.NS"]
+    assert _extract_symbols("What is the maximum drawdown for this portfolio?") == []
+    assert select_quantitative_tools("Tell me about various funds") == []  # "var" inside a word is not VaR
+
+
+def test_portfolio_sharpe_matches_reference(monkeypatch) -> None:
+    idea = [10.0, 10.5, 10.2, 10.8, 11.0, 10.7]
+    suzlon = [50.0, 49.0, 51.0, 52.5, 51.5, 53.0]
+
+    def fake_fetches(symbols: list[str], **_: object) -> dict[str, pd.DataFrame]:
+        data = {"IDEA.NS": idea, "SUZLON.NS": suzlon}
+        return {s: pd.DataFrame({s: data[s]}) for s in symbols}
+
+    monkeypatch.setattr("llm_orchestrator.utils.quantitative_tools._fetch_price_histories", fake_fetches)
+    results = execute_quantitative_tools("What is the Sharpe ratio of my portfolio?", holdings=UPSTOX_HOLDINGS)
+
+    value = pd.Series([2 * a + b for a, b in zip(idea, suzlon)])
+    returns = value.pct_change().dropna()
+    expected = (returns.mean() - 0.05 / 252) / returns.std() * math.sqrt(252)
+    assert results[0]["status"] == "ok"
+    assert results[0]["result"]["scope"] == "portfolio"
+    assert results[0]["result"]["sharpe_ratio"] == round(expected, 4)
 
 
 def test_build_quantitative_answer_formats_correlation_result() -> None:

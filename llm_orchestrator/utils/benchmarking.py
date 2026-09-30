@@ -9,6 +9,83 @@ from typing import Any
 from llm_orchestrator.utils.quantitative_tools import build_quantitative_answer, execute_quantitative_tools
 
 
+# Upstox holdings snapshot used throughout the research benchmark.
+UPSTOX_HOLDINGS: list[dict[str, Any]] = [
+    {"tradingsymbol": "IDEA", "exchange": "NSE", "quantity": 1, "average_price": 13, "last_price": 15},
+    {"tradingsymbol": "YESBANK", "exchange": "NSE", "quantity": 1, "average_price": 23, "last_price": 23},
+    {"tradingsymbol": "SUZLON", "exchange": "NSE", "quantity": 1, "average_price": 53, "last_price": 45},
+]
+
+# Primary numeric field of each tool result (the value the baseline is compared against).
+PRIMARY_RESULT_KEYS = {
+    "correlation": "correlation",
+    "beta": "beta",
+    "volatility": "volatility_pct",
+    "drawdown": "max_drawdown_pct",
+    "sharpe": "sharpe_ratio",
+    "total_return": "total_return_pct",
+    "cagr": "cagr_pct",
+    "momentum": "momentum_pct",
+    "var": "value_at_risk_pct",
+    "downside_deviation": "downside_deviation_pct",
+    "sortino": "sortino_ratio",
+    "moving_average": "moving_average",
+    "rsi": "rsi",
+    "mean_daily_return": "mean_daily_return_pct",
+    "concentration": "largest_weight_pct",
+    "portfolio_classification": "total_pnl_pct",
+}
+
+DEFAULT_PORTFOLIO_PROMPTS: list[dict[str, Any]] = [
+    {
+        "id": "correlation",
+        "prompt": "What is the correlation between gold and silver?",
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+    {
+        "id": "sharpe_ratio",
+        "prompt": "What is the Sharpe ratio for the portfolio?",
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+    {
+        "id": "var",
+        "prompt": "What is the 90-day Value at Risk for this portfolio?",
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+    {
+        "id": "drawdown",
+        "prompt": "What is the maximum drawdown for this portfolio?",
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+    {
+        "id": "rsi",
+        "prompt": "What is the RSI for the portfolio?",
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+    {
+        "id": "classification",
+        "prompt": (
+            "Calculate invested value, current value, profit or loss, and percentage profit or loss "
+            "for each holding. Classify the portfolio as Buy, Hold, Trim, or Exit using only the supplied arithmetic."
+        ),
+        "portfolio_summary": {"holdings": UPSTOX_HOLDINGS},
+    },
+]
+
+
+def extract_numeric_values(text: str | None) -> list[float]:
+    return [float(m.replace(",", "")) for m in re.findall(r"[-+]?\d[\d,]*(?:\.\d+)?", (text or "").replace("−", "-"))]
+
+
+def baseline_matches(tool_value: float | None, baseline_text: str | None, prompt: str, rel_tol: float = 0.01) -> float | None:
+    """1.0 if the baseline states the tool value (within rel_tol), ignoring numbers echoed from the prompt."""
+    if tool_value is None or not baseline_text:
+        return None
+    prompt_numbers = set(extract_numeric_values(prompt))
+    candidates = [n for n in extract_numeric_values(baseline_text) if n not in prompt_numbers]
+    return 1.0 if any(math.isclose(n, tool_value, rel_tol=rel_tol, abs_tol=0.005) for n in candidates) else 0.0
+
+
 def extract_numeric_value(text: str | None) -> float | None:
     if not text:
         return None
@@ -42,8 +119,9 @@ def run_benchmark_case(
     tool_latency_ms = round((time.perf_counter() - tool_start) * 1000.0, 2)
 
     tool_answer = build_quantitative_answer(prompt, tool_results) or ""
-    tool_numeric = extract_numeric_value(tool_answer)
     tool_name = tool_results[0].get("tool") if tool_results else "unknown"
+    tool_result = (tool_results[0].get("result") or {}) if tool_results and tool_results[0].get("status") == "ok" else {}
+    tool_numeric = tool_result.get(PRIMARY_RESULT_KEYS.get(tool_name, ""))
 
     baseline_reply = None
     baseline_latency_ms = None
@@ -66,9 +144,7 @@ def run_benchmark_case(
     if baseline_tokens:
         baseline_total_tokens = int(baseline_tokens.get("total_tokens") or 0)
 
-    tool_total_tokens = 0
-    if tool_results:
-        tool_total_tokens = 0
+    tool_total_tokens = 0  # deterministic path makes no LLM call
 
     if baseline_total_tokens is None:
         token_savings_pct = None
@@ -79,16 +155,14 @@ def run_benchmark_case(
 
     latency_delta_ms = None if baseline_latency_ms is None else round(tool_latency_ms - baseline_latency_ms, 2)
 
-    if tool_numeric is not None and baseline_numeric is not None and not math.isnan(tool_numeric):
-        accuracy_proxy = 1.0 if abs(tool_numeric - baseline_numeric) < 1e-6 else 0.0
-    else:
-        accuracy_proxy = None
+    accuracy_proxy = baseline_matches(tool_numeric, getattr(baseline_reply, "answer", None), prompt)
 
     return {
         "prompt": prompt,
         "tool_name": tool_name,
         "tool_answer": tool_answer,
         "tool_numeric": tool_numeric,
+        "tool_status": tool_results[0].get("status") if tool_results else "no_tool",
         "baseline_answer": getattr(baseline_reply, "answer", None) if baseline_reply else None,
         "baseline_numeric": baseline_numeric,
         "tool_latency_ms": tool_latency_ms,
@@ -104,6 +178,22 @@ def run_benchmark_case(
 
 def run_benchmark_suite(cases: list[dict[str, Any]], response_agent: Any | None = None) -> list[dict[str, Any]]:
     return [run_benchmark_case(prompt=case["prompt"], portfolio_summary=case.get("portfolio_summary"), response_agent=response_agent) for case in cases]
+
+
+def summarize_benchmark_results(results: list[dict[str, Any]]) -> dict[str, float | int]:
+    numeric_accuracy = [float(item.get("numeric_accuracy", 0.0)) for item in results if "numeric_accuracy" in item]
+    field_coverage = [float(item.get("field_coverage", 0.0)) for item in results if "field_coverage" in item]
+    unsupported_claims = [int(item.get("unsupported_claims", 0)) for item in results if "unsupported_claims" in item]
+    latency = [float(item.get("latency_ms", 0.0)) for item in results if "latency_ms" in item]
+    total_tokens = [float(item.get("total_tokens", 0.0)) for item in results if "total_tokens" in item]
+
+    return {
+        "mean_numeric_accuracy": round(mean(numeric_accuracy), 2) if numeric_accuracy else 0.0,
+        "mean_field_coverage": round(mean(field_coverage), 2) if field_coverage else 0.0,
+        "unsupported_claims_total": sum(unsupported_claims),
+        "mean_latency_ms": round(mean(latency), 2) if latency else 0.0,
+        "mean_total_tokens": round(mean(total_tokens), 2) if total_tokens else 0.0,
+    }
 
 
 def format_benchmark_report(results: list[dict[str, Any]]) -> str:
