@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://stock-mate-backend-e8qc.onrender.com/api/$1" },
+    { "source": "/api/(.*)", "destination": "https://foleo-backend.onrender.com/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
